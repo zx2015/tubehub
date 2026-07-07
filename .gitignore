@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# 数据目录（视频、缩略图、数据库、Cookies）
+data/
+
+# 本地知识库（不纳入版本控制）
+.learnings/
+
+# Gemini 代理本地配置目录
+.gemini/
+
+# Frontend (React + Vite)
+node_modules/
+dist/
+.vite/
+.env
+.env.local
+.env.*.local
+
+# Docker
+*.pid
