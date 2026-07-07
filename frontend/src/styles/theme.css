@@ -1,0 +1,9 @@
+/* TubeHub 设计变量 */
+:root {
+  --bg: #0e0f12;
+  --fg: #e7e9ee;
+  --accent: #4f8cff;
+  --muted: #8a90a2;
+  --border: #1f232b;
+  --radius: 8px;
+}
