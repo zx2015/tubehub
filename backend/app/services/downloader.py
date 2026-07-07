@@ -36,15 +36,73 @@ def _import_yt_dlp():
 
 
 # ---------------------------------------------------------------------------
-# yt-dlp 选项构造
+# 动态格式解析逻辑（已确认 ✅ 替代静态 QUALITY_MAP 机制）
 # ---------------------------------------------------------------------------
-QUALITY_MAP = {
-    "best":   "bestvideo+bestaudio/best",
-    "1080p":  "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-    "720p":   "bestvideo[height<=720]+bestaudio/best[height<=720]",
-    "480p":   "bestvideo[height<=480]+bestaudio/best[height<=480]",
-    "worst":  "worstvideo+worstaudio/worst",
-}
+def select_dynamic_format(info_dict: dict, requested_quality: str) -> str:
+    """
+    仿 --list-formats 进行动态格式优选：
+    1. 在 info_dict['formats'] 中寻找不高于 requested_quality 限制的最大高度视频轨 (vcodec != 'none', acodec == 'none')。
+    2. 寻找最佳音频轨 (vcodec == 'none', acodec != 'none')。
+    3. 组装为 '{bestvideo_id}+{bestaudio_id}/best'，若为老视频单合流直接回退 'best'。
+    """
+    formats = info_dict.get("formats")
+    if not formats:
+        return "best"
+
+    # 画质高度上限
+    limit_heights = {
+        "best": 99999,
+        "1080p": 1080,
+        "720p": 720,
+        "480p": 480,
+        "worst": 360
+    }
+    limit_h = limit_heights.get(requested_quality, 99999)
+
+    # 1. 过滤视频轨 (仅视频，无音频)
+    video_formats = []
+    for f in formats:
+        h = f.get("height") or 0
+        vcodec = f.get("vcodec") or "none"
+        acodec = f.get("acodec") or "none"
+        if vcodec != "none" and acodec == "none" and h <= limit_h:
+            video_formats.append(f)
+
+    # 如果在限制下完全找不到视频轨，放宽限制取能找到的最高
+    if not video_formats:
+        for f in formats:
+            vcodec = f.get("vcodec") or "none"
+            acodec = f.get("acodec") or "none"
+            if vcodec != "none" and acodec == "none":
+                video_formats.append(f)
+
+    # 按分辨率+码率对视频轨从低到高排序，取最大值
+    best_v_id = None
+    if video_formats:
+        video_formats.sort(key=lambda x: (x.get("height") or 0, x.get("tbr") or 0))
+        best_v_id = video_formats[-1].get("format_id")
+
+    # 2. 过滤音频轨 (仅音频，无视频)
+    audio_formats = []
+    for f in formats:
+        vcodec = f.get("vcodec") or "none"
+        acodec = f.get("acodec") or "none"
+        if vcodec == "none" and acodec != "none":
+            audio_formats.append(f)
+
+    best_a_id = None
+    if audio_formats:
+        # 按码率从低到高排序，取最好音频
+        audio_formats.sort(key=lambda x: x.get("tbr") or 0)
+        best_a_id = audio_formats[-1].get("format_id")
+
+    # 3. 组装格式字符串
+    if best_v_id and best_a_id:
+        return f"{best_v_id}+{best_a_id}/best"
+    elif best_v_id:
+        return f"{best_v_id}/best"
+    
+    return "best"
 
 
 def build_ydl_opts(
@@ -52,10 +110,11 @@ def build_ydl_opts(
     proxy_url: str | None,
     cookies_path: str | None,
     output_dir: str,
+    dynamic_format: str = "best"
 ) -> dict:
     """根据任务配置构造 yt-dlp 选项"""
     return {
-        "format": QUALITY_MAP[task.quality],
+        "format": dynamic_format,
         "merge_output_format": "mp4",
         "outtmpl": f"{output_dir}/%(uploader)s/%(title)s [%(id)s].%(ext)s",
         "quiet": True,
@@ -65,6 +124,13 @@ def build_ydl_opts(
 
         "proxy": proxy_url,
         "cookiefile": cookies_path,
+        
+        # 绕过 PO-Token 安全限制
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["tv", "android", "web"],
+            }
+        },
 
         # 钩子：进度 + 后处理
         "progress_hooks": [lambda d: progress_callback(d, task.id)],
@@ -169,6 +235,17 @@ async def update_task_status(task_id: int, status: str) -> None:
             return
         task.status = status
         await db.commit()
+
+
+async def update_task_title(task_id: int, title: str) -> None:
+    """更新下载任务的 title（从 extract_info 提取的真实 YouTube 标题）"""
+    async with AsyncSessionLocal() as db:
+        task = await db.get(DownloadTask, task_id)
+        if not task:
+            return
+        if task.title != title:
+            task.title = title
+            await db.commit()
 
 
 async def mark_task_cancelled(task_id: int) -> None:
@@ -287,12 +364,34 @@ async def run_download_worker(task_id: int) -> None:
             cookies_path = "data/cookies.txt" if os.path.exists("data/cookies.txt") else None
 
             ydl_opts = build_ydl_opts(task, proxy_url, cookies_path, DATA_DIR)
+            logger.info(f"Task {task_id} download config locked - Proxy URL: {proxy_url or 'None (Direct)'}, Cookies: {'data/cookies.txt' if cookies_path else 'None'}")
             CancellableYDL = make_cancellable_ydl(cancel_event)
 
             loop = asyncio.get_running_loop()
 
             def _sync_download():
                 with CancellableYDL(ydl_opts) as ydl:
+                    # 1. 第一步：先 extract_info(download=False) 获取视频全部格式信息 (相当于 --list-formats 探针)
+                    logger.info(f"Task {task_id} pre-fetching metadata for dynamic format selection...")
+                    info = ydl.extract_info(task.url, download=False)
+                    
+                    # 2. 第二步：根据真实的 formats 列表，优选出最贴合高度限制的最佳音视频 format id 组合
+                    chosen_format = select_dynamic_format(info, task.quality)
+                    logger.info(f"Task {task_id} dynamic format matched - Choice: {chosen_format} (Target: {task.quality})")
+                    
+                    # 动态更新 ydl_opts['format']
+                    ydl.params["format"] = chosen_format
+                    
+                    # 自愈更新任务中的 Title（如果 DB 中 title 为空）
+                    title = info.get("title", "Untitled")
+                    if title:
+                        loop.call_soon_threadsafe(
+                            asyncio.create_task,
+                            update_task_title(task_id, title)
+                        )
+                    
+                    # 3. 第三步：真正启动下载
+                    logger.info(f"Task {task_id} starting actual stream download with format: {chosen_format}")
                     return ydl.extract_info(task.url, download=True)
 
             await loop.run_in_executor(None, _sync_download)

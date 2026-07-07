@@ -16,7 +16,6 @@ import { useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import type { VideoRead } from '../types';
 import VideoCard from './VideoCard';
-import AddDownloadDialog from './AddDownloadDialog';
 import ConfirmDialog from './ConfirmDialog';
 
 type SortKey = 'created_desc' | 'created_asc' | 'title_asc' | 'title_desc';
@@ -50,7 +49,6 @@ export function VideoLibrary() {
   const [sortKey, setSortKey] = useState<SortKey>('created_desc');
   const [watchFilter, setWatchFilter] = useState<WatchFilter>('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [addOpen, setAddOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<number | null>(null);
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
 
@@ -177,13 +175,6 @@ export function VideoLibrary() {
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={() => setAddOpen(true)}
-        >
-          <span>＋</span> 新增下载
-        </button>
       </div>
 
       {/* === 统计概览（Stats Panel） === */}
@@ -265,7 +256,7 @@ export function VideoLibrary() {
         <div className="video-library__empty">
           <p className="video-library__empty-icon">📭</p>
           <h3>视频库空空如也</h3>
-          <p>点击右上角「新增下载」开始你的第一个收藏。</p>
+          <p>前往「下载任务」页面新建下载任务来开始您的第一个收藏。</p>
         </div>
       )}
       {showFilteredEmpty && (
@@ -289,12 +280,6 @@ export function VideoLibrary() {
           ))}
         </div>
       )}
-
-      <AddDownloadDialog
-        open={addOpen}
-        onClose={() => setAddOpen(false)}
-        onCreated={reload}
-      />
 
       <ConfirmDialog
         open={pendingDelete != null}
