@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  tubehub:
+    build: .
+    container_name: tubehub
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - SECRET_KEY=${SECRET_KEY:?required}
+      - DATABASE_URL=sqlite+aiosqlite:///./data/tubehub.db
+      - DATA_DIR=/app/data
+      - VIDEOS_DIR=/app/data/videos
+      - THUMBNAILS_DIR=/app/data/thumbnails
+      - LOGS_DIR=/app/logs
+      - MAX_CONCURRENT_DOWNLOADS=2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
