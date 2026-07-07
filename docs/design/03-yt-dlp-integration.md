@@ -2,6 +2,109 @@
 
 > 核心服务层设计：调度器 + 下载器 + 取消 + 重试。基于需求 02 §2.2 ~ 2.9 + .learnings/yt-dlp-integration.md
 
+## Revision History
+
+| 版本号 | 日期 | 变更说明 | 作者 |
+| :--- | :--- | :--- | :--- |
+| v1.0.0 | 2026-07-07 | 初始集成设计 | Gemini CLI |
+| v1.1.0 | 2026-07-07 | 追加动态格式、cookies、代理配置与端到端下载流程说明 | Gemini CLI |
+
+---
+
+## 3.0 端到端下载处理流程
+
+在 TubeHub 中，用户点击 `[＋ 新增下载]` 到视频成功入库供 Web 播放器播放，共跨越 6 个核心阶段。其整体时序与数据流设计如下：
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 用户
+    participant FE as React 前端
+    participant BE as FastAPI 后端
+    participant Sched as 调度器 (asyncio)
+    participant YTDL as yt-dlp 核心
+    participant DB as SQLite 数据库
+    participant FS as HDD 存储层
+    participant Thumb as thumbnail.py
+
+    User->>FE: 点击 [+ 新增下载] 输入 URL
+    FE->>BE: POST /api/downloads/check { url }
+    BE->>YTDL: extract_info(url, download=False)
+    YTDL-->>BE: 返回 formats / video_id / title
+    BE->>DB: 检查库中是否已有此视频 id
+    alt 视频已存在 (Conflict)
+        BE-->>FE: 返回 conflict=true + existing_video
+        FE->>User: 弹出覆盖确认弹窗
+        User->>FE: 点击 "确认覆盖"
+        FE->>BE: POST /api/downloads { url, overwrite=true }
+    else 视频不存在 (正常流)
+        BE-->>FE: 返回 conflict=false
+        FE->>BE: POST /api/downloads { url, overwrite=false }
+    end
+    BE->>DB: 写入 download_tasks (状态: queued)
+    BE-->>FE: 返回 201 Created (前端刷新为 queued)
+    
+    Note over Sched,YTDL: 调度环每 1 秒轮询 queued 任务
+
+    loop 异步下载调度环
+        Sched->>DB: 查询最早的 queued 任务
+        DB-->>Sched: 返回任务列表 (限制并发≤2)
+        Sched->>BE: 状态更新: queued -> downloading
+        Sched->>YTDL: run_download_worker(task_id, cancel_event)
+        activate YTDL
+        YTDL->>YTDL: 1) extract_info(download=False) 获取格式列表
+        YTDL->>YTDL: 2) select_dynamic_format 挑出最佳 format_id
+        YTDL->>DB: 自愈更新视频 Title 字段
+        YTDL->>YTDL: 3) extract_info(download=True) 开始真正流下载
+        loop 每一分片下载中
+            YTDL->>DB: progress_callback 更新 progress/speed/eta
+            FE->>BE: GET /api/downloads/{id}/stream (SSE 订阅)
+            BE-->>FE: 持续推送 event: progress (1s 间隔)
+        end
+        YTDL->>YTDL: postprocessor_callback (FFmpeg 合并完成)
+        YTDL->>DB: 状态更新: downloading -> merging -> ready
+        YTDL->>Thumb: download_thumbnail(youtube_id) 走代理
+        Thumb->>FS: 下载封面图到 data/thumbnails/
+        YTDL->>DB: 写入 videos 主表 (建立 play_history 级联)
+        YTDL->>FS: 视频写入 HDD data/videos/{uploader}/
+        deactivate YTDL
+    end
+```
+
+### 3.0.1 六阶段详解
+
+#### 阶段 ① — 用户发起（前端 UI）
+- **触发**：用户在「下载任务」页面右上角点击 `[＋ 新增下载]`（已收纳，视频库主页仅作纯净展示）。
+- **参数**：包含 `url`、`quality`（画质，如 `720p`）。
+
+#### 阶段 ② — 前置 check（防重机制）
+- **API**：`POST /api/downloads/check`。
+- **机制**：后端仅拉取 formats 元信息，探测是否与库中已有视频 ID 冲突。若冲突，前端会拉起覆盖确认对话框，用户点击确认后会携带 `overwrite=true` 执行下载。
+
+#### 阶段 ③ — 任务创建（写入数据库）
+- **API**：`POST /api/downloads`。
+- **歌单处理**：若是歌单链接，后台会自动 `extract_flat` 解析并将所有子视频扁平地写入 `download_tasks` 表，所有任务状态初置为 `queued`。
+
+#### 阶段 ④ — 调度器拾取（asyncio 信号量）
+- **模块**：`services/scheduler.py` 中的 `scheduler_loop()`。
+- **机制**：通过 `asyncio.Semaphore(2)` 全局控制并发。调度协程每秒巡检，将 queued 推进到pending，并在子线程中拉起 worker 进程不阻塞应用主循环。
+
+#### 阶段 ⑤ — Worker 执行（动态格式优选）
+- **模块**：`services/downloader.py`。
+- **动态选格式**：
+  - 先用 `extract_info(download=False)` 获取该视频在 YouTube 的格式数组。
+  - 动态过滤出当前高度限制下（例如 `<=720px`）的最佳视频轨 `best_v` 与最佳音频轨 `best_a`。
+  - 拼装格式为 `"399+251"` (即 `bestvideo_id+bestaudio_id/best`)，彻底规避因静态映射导致老视频缺少画质而下载报错的崩溃。
+  - **PO-Token 绕过**：强制配置 `player_client = ["tv", "android", "web"]`（优先 TV 终端）配合您上传的 Netscape Cookies。
+- **落盘自愈**：音视频下载完成后，调用 FFmpeg 自动合并为 MP4，写入视频表并自愈视频 Title。
+- **缩略图**：调用 `download_thumbnail` 通过代理下载。
+
+#### 阶段 ⑥ — 前端 SSE 实时刷新
+- **接口**：`GET /api/downloads/{id}/stream`。
+- **机制**：FastAPI `StreamingResponse` 每隔 1s 将进度帧推送至前端 useSSE 钩子，渲染一维单行流进度条，直至 ready/failed/cancelled 时连接优雅断开。
+
+---
+
 ## 3.1 文件清单
 
 | 文件 | 职责 |
