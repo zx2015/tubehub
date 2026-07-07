@@ -1,12 +1,12 @@
 /**
- * VideoCard — 视频库单卡片
+ * VideoCard — 视频库单卡片（仿 YouTube 极致美学重构）
  *
- * 设计依据：docs/design/04-frontend-components.md §4.4
- *
- * 行为：
- *  - 缩略图 + 标题 + 状态角标
- *  - hover 时显示多选 checkbox 与删除按钮
- *  - 点击卡片跳转到 /watch/:id
+ * 包含：
+ *  - 16:9 缩略图
+ *  - 右下角黑色时长角标 (YouTube 经典)
+ *  - 封面底部红色 watch percentage 进度条带 (YouTube 经典)
+ *  - 单删与 Checkbox 在 Hover 时在封面左上/右上浮现 Overlay，不占用元信息层
+ *  - 扁平整洁的元数据：标题（最多 2 行截断） + 上传者名 + 添加日期
  */
 import { Link } from 'react-router-dom';
 import { useMemo } from 'react';
@@ -35,51 +35,117 @@ function formatPercent(video: VideoRead): number {
   return Math.min(100, Math.round((video.last_position / duration) * 100));
 }
 
+// 格式化秒数为 hh:mm:ss / mm:ss
+function formatDuration(seconds: number | null | undefined): string {
+  if (!seconds || seconds <= 0) return '00:00';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+
+  const mStr = m.toString().padStart(2, '0');
+  const sStr = s.toString().padStart(2, '0');
+
+  if (h > 0) {
+    return `${h}:${mStr}:${sStr}`;
+  }
+  return `${m}:${sStr}`;
+}
+
+// 格式化入库日期
+function formatDate(dateStr?: string): string {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+}
+
 export function VideoCard({ video, selected, onSelect, onDelete }: VideoCardProps) {
   const status = useMemo(() => calcStatus(video), [video]);
   const percent = useMemo(() => formatPercent(video), [video]);
+  const durationStr = useMemo(
+    () => formatDuration(video.duration),
+    [video.duration],
+  );
+  const dateStr = useMemo(() => formatDate(video.created_at), [video.created_at]);
 
   const thumbnailUrl = `/api/videos/${video.id}/thumbnail`;
 
   return (
     <div className={`video-card ${selected ? 'video-card--selected' : ''}`}>
-      <input
-        type="checkbox"
-        className="video-card__checkbox"
-        checked={selected}
-        onChange={() => onSelect(video.id)}
-        aria-label={`选择 ${video.title}`}
-      />
-      <button
-        type="button"
-        className="video-card__delete"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onDelete(video.id);
-        }}
-        aria-label="删除视频"
-        title="删除"
-      >
-        🗑
-      </button>
+      {/* 16:9 比例缩略图容器 */}
+      <div className="video-card__thumb-container">
+        <Link to={`/watch/${video.id}`} className="video-card__link">
+          <img
+            className="video-card__thumb"
+            src={thumbnailUrl}
+            alt={video.title}
+            loading="lazy"
+          />
+        </Link>
 
-      <Link to={`/watch/${video.id}`} className="video-card__link">
-        <div className="video-card__thumb">
-          <img src={thumbnailUrl} alt={video.title} loading="lazy" />
-          <span className={`video-card__badge video-card__badge--${status}`}>
+        {/* YouTube 经典：右下角时长 */}
+        <span className="video-card__duration">{durationStr}</span>
+
+        {/* 状态角标 (🆕 未播放 / ✓ 已看完) */}
+        {status !== 'watching' && (
+          <span className={`video-card__status-badge video-card__status-badge--${status}`}>
             {status === 'unwatched' && '🆕'}
-            {status === 'watching' && `${percent}%`}
             {status === 'completed' && '✓'}
           </span>
-        </div>
-        <h3 className="video-card__title" title={video.title}>
-          {video.title}
-        </h3>
-        {video.uploader && (
-          <p className="video-card__meta">{video.uploader}</p>
         )}
-      </Link>
+
+        {/* YouTube 经典：底部红色 watch 进度条带 */}
+        {status === 'watching' && (
+          <div className="video-card__progress-track" title={`已观看 ${percent}%`}>
+            <div
+              className="video-card__progress-bar"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        )}
+
+        {/* Hover 浮现的操作 Overlay */}
+        <div className="video-card__overlay">
+          <input
+            type="checkbox"
+            className="video-card__checkbox"
+            checked={selected}
+            onChange={() => onSelect(video.id)}
+            aria-label={`选择 ${video.title}`}
+          />
+          <button
+            type="button"
+            className="video-card__delete"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onDelete(video.id);
+            }}
+            title="删除视频"
+          >
+            🗑
+          </button>
+        </div>
+      </div>
+
+      {/* 下方元信息（纯净 YouTube 质感） */}
+      <div className="video-card__meta">
+        <Link to={`/watch/${video.id}`} className="video-card__link">
+          <h3 className="video-card__title" title={video.title}>
+            {video.title}
+          </h3>
+        </Link>
+        <div className="video-card__info-row">
+          {video.uploader && (
+            <span className="video-card__uploader">{video.uploader}</span>
+          )}
+          <span className="video-card__dot-divider">•</span>
+          <span className="video-card__date">{dateStr || '刚刚'}</span>
+        </div>
+      </div>
     </div>
   );
 }

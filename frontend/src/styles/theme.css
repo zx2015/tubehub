@@ -1,9 +1,40 @@
-/* TubeHub 设计变量 */
+/* TubeHub 设计变量（仿 YouTube 深色主题） */
 :root {
-  --bg: #0e0f12;
-  --fg: #e7e9ee;
-  --accent: #4f8cff;
-  --muted: #8a90a2;
-  --border: #1f232b;
-  --radius: 8px;
+  /* 颜色 */
+  --bg: #0f0f0f;
+  --bg-elevated: #181818;
+  --bg-overlay: rgba(0, 0, 0, 0.7);
+  --fg: #f1f1f1;
+  --fg-secondary: #aaaaaa;
+  --fg-tertiary: #717171;
+  --accent: #ff0000;              /* YouTube 经典红色 */
+  --accent-hover: #cc0000;
+  --accent-blue: #3ea6ff;
+  --muted: #717171;
+
+  --border: #303030;
+  --border-light: #272727;
+  --hover-bg: rgba(255, 255, 255, 0.1);
+  --active-bg: rgba(255, 255, 255, 0.2);
+
+  /* 尺寸 */
+  --header-height: 56px;
+  --sidebar-width: 240px;
+  --sidebar-mini: 72px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-full: 9999px;
+
+  /* 阴影 */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.4);
+
+  /* 动效 */
+  --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 后续可扩展：浅色主题 */
+@media (prefers-color-scheme: light) {
+  /* 暂保持深色，避免夜间被强制反色 */
 }
