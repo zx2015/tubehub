@@ -404,3 +404,74 @@ async def run_download_worker(task_id: int) -> None:
             await handle_download_failure(task_id, str(e))
         finally:
             cancel_events.pop(task_id, None)
+
+
+# ---------------------------------------------------------------------------
+# 手动重试 / 任务删除（API 层调用）
+# ---------------------------------------------------------------------------
+async def reset_task_for_manual_retry(task_id: int) -> bool:
+    """
+    手动重试入口（被 POST /api/downloads/{id}/retry 调用）：
+    - 仅对已结束（failed / cancelled）任务生效
+    - 将 retry_count 重置为 0、清理错误信息
+    - 状态置回 queued，调度环会自动拾取重新入队
+    """
+    async with AsyncSessionLocal() as db:
+        task = await db.get(DownloadTask, task_id)
+        if not task:
+            return False
+        if task.status not in ("failed", "cancelled"):
+            return False
+
+        task.status = "queued"
+        task.retry_count = 0
+        task.error_message = None
+        task.progress = 0.0
+        task.downloaded_bytes = 0
+        task.speed = None
+        task.eta = None
+        task.last_attempt_at = datetime.utcnow()
+        task.finished_at = None
+        await db.commit()
+        logger.info(f"Task {task_id} manually retried by user - reset to queued.")
+        return True
+
+
+async def delete_download_task(task_id: int) -> bool:
+    """
+    物理删除任务记录（被 DELETE /api/downloads/{id} 调用）：
+    - 支持删除 finished (ready/failed/cancelled) 状态的任务，清理 DB 占位
+    - 进行中 (downloading/merging/queued) 任务拒绝删除，必须先取消
+    """
+    async with AsyncSessionLocal() as db:
+        task = await db.get(DownloadTask, task_id)
+        if not task:
+            return False
+        if task.status in ("downloading", "merging", "queued", "pending"):
+            return False
+        await db.delete(task)
+        await db.commit()
+        logger.info(f"Task {task_id} permanently deleted from history.")
+        return True
+
+
+async def cancel_running_task(task_id: int) -> bool:
+    """
+    取消进行中的任务（被 DELETE /api/downloads/{id} 调用）：
+    - 触发 cancel_event 让 worker 协作式中断
+    - 立刻将状态置为 cancelled
+    """
+    # 先通知 cancel_event，让 hook 抛 DownloadCancelled
+    evt = cancel_events.get(task_id)
+    if evt:
+        evt.set()
+    async with AsyncSessionLocal() as db:
+        task = await db.get(DownloadTask, task_id)
+        if not task:
+            return False
+        task.status = "cancelled"
+        task.finished_at = datetime.utcnow()
+        await db.commit()
+    cancel_events.pop(task_id, None)
+    logger.info(f"Task {task_id} cancelled by user.")
+    return True

@@ -547,3 +547,269 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ==========================================
+   下载任务列表 (单行紧凑布局)
+   ========================================== */
+.downloads {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding-bottom: 32px;
+}
+
+.downloads__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.downloads__title-area h1 {
+  margin: 0 0 6px 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.downloads__subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg-secondary);
+}
+
+.downloads__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.downloads__status,
+.downloads__empty {
+  text-align: center;
+  padding: 48px 16px;
+  color: var(--fg-secondary);
+  font-size: 14px;
+}
+
+.downloads__empty-icon {
+  font-size: 64px;
+  margin: 0 0 12px 0;
+}
+
+.downloads__empty h3 {
+  font-size: 18px;
+  color: var(--fg);
+  margin-bottom: 8px;
+}
+
+.downloads__status--error {
+  color: #ff6b6b;
+}
+
+.downloads__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 任务行：核心单行布局 (CSS Grid 一维) */
+.download-row {
+  display: grid;
+  grid-template-columns: 1.4fr 0.7fr 1.6fr auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  transition: background-color var(--transition);
+}
+
+.download-row:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.download-row--downloading { border-left: 3px solid var(--accent); }
+.download-row--merging     { border-left: 3px solid var(--accent); }
+.download-row--failed      { border-left: 3px solid #ff5252; }
+.download-row--ready       { border-left: 3px solid #4caf50; }
+.download-row--cancelled   { border-left: 3px solid var(--fg-tertiary); }
+.download-row--queued,
+.download-row--pending     { border-left: 3px solid var(--accent-blue); }
+
+.download-row__title-cell {
+  min-width: 0;
+}
+
+.download-row__title {
+  display: block;
+  font-weight: 500;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.download-row__link-cell {
+  min-width: 0;
+}
+
+.download-row__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--accent-blue);
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color var(--transition);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-row__link:hover {
+  background-color: var(--hover-bg);
+}
+
+.download-row__progress-cell {
+  min-width: 0;
+}
+
+.download-row__progress {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.download-row__progress-track {
+  height: 6px;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  grid-column: 1 / -1;
+}
+
+.download-row__progress-fill {
+  height: 100%;
+  background-color: var(--accent);
+  transition: width 0.3s linear;
+}
+
+.download-row__progress-percent {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.download-row__progress-speed {
+  font-size: 11px;
+  color: var(--fg-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.download-row__progress-empty {
+  color: var(--fg-tertiary);
+  font-size: 12px;
+}
+
+.download-row__retry-hint {
+  color: var(--accent-blue);
+  font-size: 12px;
+}
+
+.download-row__status-cell {
+  white-space: nowrap;
+}
+
+.download-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.download-badge--pending     { background: rgba(62, 166, 255, 0.15); color: #3ea6ff; }
+.download-badge--queued      { background: rgba(62, 166, 255, 0.15); color: #3ea6ff; }
+.download-badge--downloading { background: rgba(255, 0, 0, 0.15);    color: #ff7373; }
+.download-badge--merging     { background: rgba(255, 165, 0, 0.15); color: #ffa726; }
+.download-badge--ready       { background: rgba(76, 175, 80, 0.15); color: #81c784; }
+.download-badge--failed      { background: rgba(255, 82, 82, 0.15); color: #ff8a80; }
+.download-badge--cancelled   { background: rgba(120, 120, 120, 0.15); color: #bdbdbd; }
+
+.download-row__actions-cell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* 图标按钮样式 */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all var(--transition);
+}
+
+.icon-btn:hover {
+  transform: translateY(-1px);
+}
+
+.icon-btn--primary {
+  color: var(--accent-blue);
+  border-color: rgba(62, 166, 255, 0.3);
+}
+
+.icon-btn--primary:hover {
+  background-color: rgba(62, 166, 255, 0.15);
+  border-color: var(--accent-blue);
+}
+
+.icon-btn--danger {
+  color: #ff8a80;
+  border-color: rgba(255, 138, 128, 0.3);
+}
+
+.icon-btn--danger:hover {
+  background-color: rgba(255, 82, 82, 0.15);
+  border-color: #ff5252;
+}
+
+/* 响应式：在小屏退化为两行布局 */
+@media (max-width: 1024px) {
+  .download-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "title status"
+      "link link"
+      "progress progress"
+      "actions actions";
+    row-gap: 8px;
+  }
+  .download-row__title-cell { grid-area: title; }
+  .download-row__status-cell { grid-area: status; justify-self: end; }
+  .download-row__link-cell { grid-area: link; }
+  .download-row__progress-cell { grid-area: progress; }
+  .download-row__actions-cell { grid-area: actions; justify-content: flex-end; }
+}

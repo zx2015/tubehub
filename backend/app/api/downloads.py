@@ -116,22 +116,54 @@ async def list_downloads(
     return [DownloadTaskRead.model_validate(t) for t in rows]
 
 
-@router.get("/{task_id}")
-async def get_download(task_id: int):
-    """任务详情（占位实现）。"""
-    return {"msg": "TODO", "task_id": task_id}
+@router.get("/{task_id}", response_model=DownloadTaskRead)
+async def get_download(task_id: int, db: AsyncSession = Depends(get_db)):
+    """获取任务详情。"""
+    from ..models import DownloadTask
+    task = await db.get(DownloadTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return DownloadTaskRead.model_validate(task)
 
 
 @router.delete("/{task_id}", status_code=204)
-async def delete_download(task_id: int):
-    """取消/删除任务（占位实现）。"""
-    return {"msg": "TODO", "task_id": task_id}
+async def delete_download(task_id: int, db: AsyncSession = Depends(get_db)):
+    """取消或物理删除下载任务：
+    - 若任务处于进行中状态（downloading / merging / queued），调用取消逻辑
+    - 若任务已处于终态（ready / failed / cancelled），调用物理删除逻辑清理流水历史
+    """
+    from ..models import DownloadTask
+    from ..services.downloader import cancel_running_task, delete_download_task
+
+    task = await db.get(DownloadTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    if task.status in ("downloading", "merging", "queued", "pending"):
+        # 进行中任务 → 调用协程协作取消
+        ok = await cancel_running_task(task_id)
+        if not ok:
+            raise HTTPException(status_code=500, detail="取消失败")
+    else:
+        # 已结束状态 → 物理从 DB 删除该纪录流水
+        ok = await delete_download_task(task_id)
+        if not ok:
+            raise HTTPException(status_code=500, detail="删除记录失败")
 
 
-@router.post("/{task_id}/retry")
-async def retry_download(task_id: int):
-    """手动重试失败任务（占位实现）。"""
-    return {"msg": "TODO", "task_id": task_id}
+@router.post("/{task_id}/retry", response_model=DownloadTaskRead)
+async def retry_download(task_id: int, db: AsyncSession = Depends(get_db)):
+    """手动重载/重试下载失败、或被取消的任务"""
+    from ..models import DownloadTask
+    from ..services.downloader import reset_task_for_manual_retry
+
+    ok = await reset_task_for_manual_retry(task_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="当前任务状态不满足重试条件 (必须为 failed/cancelled)")
+
+    # 重新取回状态已重置为 queued 的 task 并返回
+    task = await db.get(DownloadTask, task_id)
+    return DownloadTaskRead.model_validate(task)
 
 
 @router.get("/{task_id}/stream")

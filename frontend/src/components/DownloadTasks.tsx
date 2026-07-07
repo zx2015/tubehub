@@ -1,16 +1,15 @@
 /**
- * DownloadTasks — 下载任务列表（仿 YouTube 体验重构：内置新建下载）
+ * DownloadTasks — 下载任务列表（单行紧凑 UI 重构）
  *
- * 设计依据：docs/design/04-frontend-components.md §4.2
+ * 设计依据：docs/design/04-frontend-components.md §4.2 + 用户 2026-07-07 决策
  *
- * 功能：
- *  - 列出所有下载任务（GET /api/downloads）
- *  - 每个任务通过 SSE（GET /api/downloads/{id}/stream）实时更新进度
- *  - 状态标签：Pending / Queued / Downloading / Merging / Ready / Failed / Cancelled
- *  - 进度条：百分比 + 速度 + ETA
- *  - Failed 任务支持「重试」（POST /api/downloads/{id}/retry）
- *  - 任务支持「取消/删除」（DELETE /api/downloads/{id}）
- *  - **新增下载入口重置于此（用户 2026-07-07 决策）**
+ * 核心变更：
+ *  - 单行 UI：标题 / 链接 / 进度条 / 状态徽章 / 图标按钮组（一行展示）
+ *  - 操作按钮 100% 替换为图标：
+ *      - 🔄 重试（仅 failed 状态）
+ *      - ❌ 取消（仅在进行中：downloading / merging / queued / pending）
+ *      - 🗑 删除（仅在终态：ready / failed / cancelled）
+ *  - 新增下载入口保留于页面顶部右侧（已确认）
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useApi } from '../hooks/useApi';
@@ -33,105 +32,131 @@ function formatPercent(progress: number): string {
   return `${n.toFixed(1)}%`;
 }
 
-function ProgressBar({ value }: { value: number }) {
-  const n = Math.max(0, Math.min(100, value));
-  return (
-    <div className="download-row__progress-track" role="progressbar" aria-valuenow={n}>
-      <div
-        className="download-row__progress-fill"
-        style={{ width: `${n}%` }}
-      />
-    </div>
-  );
-}
-
 interface TaskRowProps {
   task: DownloadTaskRead;
   onCancel: (id: number) => void;
   onRetry: (id: number) => void;
+  onDelete: (id: number) => void;
 }
 
-function TaskRow({ task, onCancel, onRetry }: TaskRowProps) {
+function TaskRow({ task, onCancel, onRetry, onDelete }: TaskRowProps) {
   const [live, setLive] = useState<DownloadTaskRead>(task);
 
-  // 当服务端数据库变更时，利用 SSE 推送最新进度给组件
+  // SSE 进度推送
   const onProgressPush = useCallback((updated: DownloadTaskRead) => {
     setLive(updated);
   }, []);
 
-  // 仅在任务处于进行中状态时，开启 SSE 进度同步
+  // 仅在任务处于进行中状态时，订阅 SSE
   const sseUrl =
     live.status === 'downloading' || live.status === 'merging' || live.status === 'queued'
       ? `/api/downloads/${task.id}/stream`
       : null;
-
   useSSE<DownloadTaskRead>(sseUrl || '', onProgressPush);
 
-  // 兜底同步 initial props 变更
+  // 同步 props 变更（如父组件 reload 后）
   useEffect(() => {
     setLive(task);
   }, [task]);
 
-  const showPercent = live.status === 'downloading' || live.status === 'merging';
+  // 显示进度条的条件：仅在下载/合并阶段
   const showProgress = live.status === 'downloading' || live.status === 'merging';
+  // 取消按钮：仅在进行中状态可见
   const showCancel =
-    live.status === 'pending' ||
-    live.status === 'queued' ||
     live.status === 'downloading' ||
-    live.status === 'merging';
-  const showRetry = live.status === 'failed';
+    live.status === 'merging' ||
+    live.status === 'queued' ||
+    live.status === 'pending';
+  // 重试按钮：仅在失败/取消状态
+  const showRetry = live.status === 'failed' || live.status === 'cancelled';
+  // 删除按钮：仅在已结束状态（避免误删进行中任务）
+  const showDelete =
+    live.status === 'ready' || live.status === 'failed' || live.status === 'cancelled';
 
   return (
     <li className={`download-row download-row--${live.status}`}>
-      <div className="download-row__info">
+      {/* === 单行布局：title | link | progress | status | actions === */}
+      <div className="download-row__title-cell">
         <span className="download-row__title" title={live.title || live.url}>
           {live.title || live.url}
         </span>
-        <div className="download-row__meta">
-          <span className={`download-badge download-badge--${live.status}`}>
-            {STATUS_LABEL[live.status] || live.status}
-          </span>
-          {live.status === 'downloading' && (
-            <>
-              <span className="download-row__stat">{live.speed || '0 B/s'}</span>
-              <span className="download-row__divider">•</span>
-              <span className="download-row__stat">剩余 {live.eta || '00:00'}</span>
-            </>
-          )}
-          {live.retry_count > 0 && live.status === 'queued' && (
-            <span className="download-row__retry-hint">
-              (正在自动重试 {live.retry_count}/{live.max_retries}...)
-            </span>
-          )}
-        </div>
       </div>
 
-      <div className="download-row__control">
-        {showPercent && (
-          <span className="download-row__percent">
-            {formatPercent(live.progress)}
+      <div className="download-row__link-cell">
+        <a
+          href={live.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="download-row__link"
+          title="在 YouTube 上查看原始视频"
+        >
+          🔗 原始链接
+        </a>
+      </div>
+
+      <div className="download-row__progress-cell">
+        {showProgress ? (
+          <div className="download-row__progress">
+            <div className="download-row__progress-track">
+              <div
+                className="download-row__progress-fill"
+                style={{ width: `${Math.max(0, Math.min(100, live.progress))}%` }}
+              />
+            </div>
+            <span className="download-row__progress-percent">
+              {formatPercent(live.progress)}
+            </span>
+            <span className="download-row__progress-speed">
+              {live.speed || ''} {live.eta ? `· 剩余 ${live.eta}` : ''}
+            </span>
+          </div>
+        ) : live.status === 'queued' && live.retry_count > 0 ? (
+          <span className="download-row__retry-hint">
+            ⏳ 自动重试中 ({live.retry_count}/{live.max_retries})
           </span>
+        ) : (
+          <span className="download-row__progress-empty">—</span>
         )}
+      </div>
 
-        {showProgress && <ProgressBar value={live.progress} />}
+      <div className="download-row__status-cell">
+        <span className={`download-badge download-badge--${live.status}`}>
+          {STATUS_LABEL[live.status] || live.status}
+        </span>
+      </div>
 
+      <div className="download-row__actions-cell">
         {showRetry && (
           <button
             type="button"
-            className="btn btn--primary"
+            className="icon-btn icon-btn--primary"
             onClick={() => onRetry(live.id)}
+            title="重试此任务"
+            aria-label="重试"
           >
-            重试
+            🔄
           </button>
         )}
-
         {showCancel && (
           <button
             type="button"
-            className="btn btn--danger"
+            className="icon-btn icon-btn--danger"
             onClick={() => onCancel(live.id)}
+            title="取消此任务"
+            aria-label="取消"
           >
-            取消
+            ❌
+          </button>
+        )}
+        {showDelete && (
+          <button
+            type="button"
+            className="icon-btn icon-btn--danger"
+            onClick={() => onDelete(live.id)}
+            title="从历史中删除此任务"
+            aria-label="删除"
+          >
+            🗑
           </button>
         )}
       </div>
@@ -163,19 +188,24 @@ export function DownloadTasks() {
     reload();
   };
 
+  const handleDelete = async (id: number) => {
+    try {
+      await fetch(`/api/downloads/${id}`, { method: 'DELETE' });
+    } catch {
+      // 忽略，仍刷新
+    }
+    reload();
+  };
+
   return (
     <div className="downloads">
       <header className="downloads__header">
         <div className="downloads__title-area">
           <h1>下载任务</h1>
-          <p className="downloads__subtitle">在这里管理与新建您的 YouTube 视频下载流水线</p>
+          <p className="downloads__subtitle">单行展示：标题 / 链接 / 进度 / 状态 / 操作</p>
         </div>
         <div className="downloads__actions">
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={reload}
-          >
+          <button type="button" className="btn btn--ghost" onClick={reload}>
             🔄 刷新
           </button>
           <button
@@ -210,6 +240,7 @@ export function DownloadTasks() {
               task={task}
               onCancel={handleCancel}
               onRetry={handleRetry}
+              onDelete={handleDelete}
             />
           ))}
         </ul>
