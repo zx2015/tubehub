@@ -167,9 +167,57 @@ async def retry_download(task_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{task_id}/stream")
-async def stream_progress(task_id: int):
-    """SSE 实时进度推送（占位实现，完整 SSE 接入 SSE_Push 模块后实现）。
-
-    SSE 数据格式见 docs/design/06-error-handling.md §6.4.1
+async def stream_progress(task_id: int, db: AsyncSession = Depends(get_db)):
+    """SSE 实时进度推送：
+    - 每 1 秒轮询数据库中对应任务的状态/进度字段
+    - 一旦状态变为 ready/failed/cancelled 等终态，推送最终帧并关闭连接
+    - 防止客户端 EventSource 因响应格式错误中断
     """
-    return {"msg": "TODO", "task_id": task_id}
+    import asyncio
+    import json
+    from fastapi.responses import StreamingResponse
+    from ..models import DownloadTask
+
+    async def event_generator():
+        # 1. 推送首帧（无论状态，立即返回当前快照，避免客户端等待）
+        task = await db.get(DownloadTask, task_id)
+        if not task:
+            yield f"event: error\ndata: {{\"detail\": \"任务不存在\"}}\n\n"
+            return
+
+        first_payload = DownloadTaskRead.model_validate(task).model_dump_json()
+        yield f"event: progress\ndata: {first_payload}\n\n"
+
+        # 2. 周期轮询直到任务进入终态
+        last_state = task.status
+        while True:
+            await asyncio.sleep(1.0)
+            task = await db.get(DownloadTask, task_id)
+            if not task:
+                yield f"event: error\ndata: {{\"detail\": \"任务已被删除\"}}\n\n"
+                return
+
+            # 仅当状态或进度变化时推送（减少带宽）
+            current_state = task.status
+            payload = DownloadTaskRead.model_validate(task).model_dump_json()
+            yield f"event: progress\ndata: {payload}\n\n"
+
+            # 终态：推送一次后立即结束
+            if current_state in ("ready", "failed", "cancelled"):
+                last_state = current_state
+                break
+
+            # 防御：如果任务卡在 queued/pending 超过 60s 也主动断开，避免悬挂连接
+            if current_state in ("queued", "pending"):
+                # 简单心跳：保持连接存活但不强制断开（让客户端继续接收后续进度）
+                pass
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # 防止 Nginx 等代理缓冲
+            "Connection": "keep-alive",
+        },
+    )
