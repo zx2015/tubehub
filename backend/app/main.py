@@ -70,4 +70,22 @@ app.include_router(settings.router)
 
 # 静态目录（缩略图占位图、前端构建产物等）
 os.makedirs("static", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# 根路径下挂载静态资源（html=True 让 / 直接返回 index.html）
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+# SPA 兜底路由：所有未匹配的路径（非 /api/*）都返回前端 index.html
+# 让 React Router 在前端接管 /downloads、/settings、/watch/:id 等路径
+from fastapi.responses import FileResponse, JSONResponse
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def spa_catchall(full_path: str):
+    # API 路由交由 FastAPI 自身的 404 处理
+    if full_path.startswith("api/"):
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+    # 静态文件资源（assets 等）应已被 mount 命中；这里只兜底 SPA 路由
+    index_path = os.path.join("static", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return JSONResponse(status_code=404, content={"detail": "Frontend index.html not found"})
