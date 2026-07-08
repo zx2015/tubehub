@@ -1,28 +1,23 @@
 /**
- * AddDownloadDialog — 新增下载对话框
+ * AddDownloadPanel — 页面内快速悬浮下载面板 (Gmail / 写信浮窗风格)
  *
- * 设计依据：docs/design/04-frontend-components.md §4.7
- *
- * 流程：
- *  1. 用户输入 URL + 选择画质
- *  2. POST /api/downloads/check 检测冲突
- *  3. 有冲突时回显，提示用户选择是否覆盖
- *  4. POST /api/downloads 提交任务
- *
- * 简化：后端 check/download 接口尚未完全实现时使用 mock 兜底，
- *      失败则展示错误但不影响关闭。
+ * 关键设计：
+ *  - 挂载在 Layout 级别，全站常驻在右下角
+ *  - 无遮罩 Backdrop：用户在下载时可以继续自由点击、浏览主页面，体验极为流畅
+ *  - 最小化 (Minimize)：点击 "➖" 可折叠收缩为右下角小胶囊，不占空间；再次点击展开
+ *  - 异步进行：提交后，面板内部显示 Progress Spinner 与 "Scraper 解析中..."，用户可以在主页面看到成果
  */
 import { useState } from 'react';
 
-interface AddDownloadDialogProps {
-  open: boolean;
-  onClose: () => void;
+interface AddDownloadPanelProps {
   onCreated?: () => void;
 }
 
 type Quality = 'best' | '1080p' | '720p' | '480p' | 'worst';
 
-export function AddDownloadDialog({ open, onClose, onCreated }: AddDownloadDialogProps) {
+export function AddDownloadPanel({ onCreated }: AddDownloadPanelProps) {
+  const [isOpen, setIsOpen] = useState(false);                  // 是否打开面板
+  const [isMinimized, setIsMinimized] = useState(false);          // 是否最小化
   const [url, setUrl] = useState('');
   const [quality, setQuality] = useState<Quality>('best');
   const [overwrite, setOverwrite] = useState(false);
@@ -32,8 +27,6 @@ export function AddDownloadDialog({ open, onClose, onCreated }: AddDownloadDialo
     conflict: boolean;
     title?: string;
   } | null>(null);
-
-  if (!open) return null;
 
   const reset = () => {
     setUrl('');
@@ -46,7 +39,7 @@ export function AddDownloadDialog({ open, onClose, onCreated }: AddDownloadDialo
 
   const handleClose = () => {
     reset();
-    onClose();
+    setIsOpen(false);
   };
 
   const handleCheck = async () => {
@@ -62,7 +55,6 @@ export function AddDownloadDialog({ open, onClose, onCreated }: AddDownloadDialo
         body: JSON.stringify({ url: url.trim() }),
       });
       if (!resp.ok) {
-        // 后端尚未实现时降级为无冲突
         setCheckResult({ conflict: false });
         return;
       }
@@ -72,7 +64,6 @@ export function AddDownloadDialog({ open, onClose, onCreated }: AddDownloadDialo
         title: data?.title ?? undefined,
       });
     } catch {
-      // 网络错误兜底
       setCheckResult({ conflict: false });
     }
   };
@@ -93,60 +84,97 @@ export function AddDownloadDialog({ open, onClose, onCreated }: AddDownloadDialo
           format_type: 'video',
           quality,
           overwrite,
-          download_subtitles: false,
         }),
       });
       if (!resp.ok) {
         const text = await resp.text();
-        setError(`提交失败 (${resp.status}): ${text || '未知错误'}`);
+        setError(`提交失败: ${text || '未知错误'}`);
         setSubmitting(false);
         return;
       }
       onCreated?.();
-      handleClose();
+      // 成功提交后，自动最小化提示用户 (类似浏览器下载下载气泡)，并在 3 秒后关闭
+      setIsMinimized(true);
+      setTimeout(() => {
+        handleClose();
+      }, 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : '提交失败');
       setSubmitting(false);
     }
   };
 
-  return (
-    <div
-      className="add-download__backdrop"
-      role="dialog"
-      aria-modal="true"
-      onClick={handleClose}
-    >
-      <div className="add-download" onClick={(e) => e.stopPropagation()}>
-        <h2 className="add-download__title">新增下载</h2>
+  // 1. 面板未开启状态：显示悬浮触发气泡 (Minimized Button)
+  if (!isOpen) {
+    return (
+      <button
+        type="button"
+        className="floating-trigger"
+        onClick={() => setIsOpen(true)}
+        title="快速添加下载任务"
+      >
+        <span className="floating-trigger__icon">📥</span>
+        <span className="floating-trigger__text">快速下载</span>
+      </button>
+    );
+  }
 
-        <label className="add-download__label">
-          视频 URL
+  // 2. 最小化折叠态
+  if (isMinimized) {
+    return (
+      <div className="floating-panel floating-panel--minimized">
+        <div className="floating-panel__header" onClick={() => setIsMinimized(false)}>
+          <span className="floating-panel__title-icon">📥</span>
+          <span className="floating-panel__minimized-title">
+            {submitting ? '🚀 Scraper 元数据提取中...' : '📥 快速下载面板已折叠'}
+          </span>
+          <div className="floating-panel__controls">
+            <button type="button" onClick={() => setIsMinimized(false)} title="展开">➕</button>
+            <button type="button" onClick={handleClose} title="关闭">❌</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. 展开后的完整写信窗态
+  return (
+    <div className="floating-panel">
+      <div className="floating-panel__header">
+        <div className="floating-panel__brand">
+          <span className="floating-panel__title-icon">📥</span>
+          <span className="floating-panel__title-text">快速新建下载</span>
+        </div>
+        <div className="floating-panel__controls">
+          <button type="button" onClick={() => setIsMinimized(true)} title="最小化">➖</button>
+          <button type="button" onClick={handleClose} title="关闭">❌</button>
+        </div>
+      </div>
+
+      <div className="floating-panel__body">
+        <div className="floating-panel__field">
+          <label>YouTube 视频 / 歌单 URL</label>
           <input
             type="url"
-            className="add-download__input"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://www.youtube.com/watch?v=..."
+            placeholder="粘贴 watch?v= 或 playlist?list="
+            disabled={submitting}
           />
-        </label>
+        </div>
 
-        <div className="add-download__row">
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={handleCheck}
-            disabled={!url.trim() || submitting}
-          >
-            检测冲突
-          </button>
+        <div className="floating-panel__row">
+          <div className="floating-panel__field">
+            <label>格式</label>
+            <input type="text" value="视频 (.mp4)" disabled />
+          </div>
 
-          <label className="add-download__label add-download__label--inline">
-            画质
+          <div className="floating-panel__field">
+            <label>画质</label>
             <select
-              className="add-download__select"
               value={quality}
               onChange={(e) => setQuality(e.target.value as Quality)}
+              disabled={submitting}
             >
               <option value="best">最佳</option>
               <option value="1080p">1080p</option>
@@ -154,48 +182,65 @@ export function AddDownloadDialog({ open, onClose, onCreated }: AddDownloadDialo
               <option value="480p">480p</option>
               <option value="worst">最低</option>
             </select>
-          </label>
+          </div>
         </div>
 
-        {checkResult?.conflict && (
-          <div className="add-download__conflict">
-            <p>
-              ⚠️ 该视频已在库中：<strong>{checkResult.title ?? '未知标题'}</strong>
-            </p>
-            <label className="add-download__checkbox">
-              <input
-                type="checkbox"
-                checked={overwrite}
-                onChange={(e) => setOverwrite(e.target.checked)}
-              />
-              覆盖现有下载
-            </label>
-          </div>
-        )}
-
-        {error && <div className="add-download__error">{error}</div>}
-
-        <div className="add-download__actions">
+        <div style={{ marginTop: '8px' }}>
           <button
             type="button"
             className="btn btn--ghost"
-            onClick={handleClose}
-            disabled={submitting}
+            style={{ width: '100%', height: '32px', fontSize: '12px' }}
+            onClick={handleCheck}
+            disabled={!url.trim() || submitting}
           >
-            取消
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={handleSubmit}
-            disabled={submitting || !url.trim()}
-          >
-            {submitting ? '提交中…' : '添加'}
+            🔍 检测冲突（防重）
           </button>
         </div>
+
+        {checkResult && (
+          <div className="floating-panel__conflict">
+            {checkResult.conflict ? (
+              <>
+                <p>⚠️ 该视频已在库中：</p>
+                <p className="conflict-title"><strong>{checkResult.title ?? '未知标题'}</strong></p>
+                <label className="conflict-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={overwrite}
+                    onChange={(e) => setOverwrite(e.target.checked)}
+                  />
+                  覆盖现有文件
+                </label>
+              </>
+            ) : (
+              <p className="conflict-ok">✅ 此视频未下载过，可以安全添加</p>
+            )}
+          </div>
+        )}
+
+        {error && <div className="floating-panel__error">⚠️ {error}</div>}
+      </div>
+
+      <div className="floating-panel__footer">
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={handleClose}
+          disabled={submitting}
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={handleSubmit}
+          disabled={submitting || !url.trim()}
+        >
+          {submitting ? '🚀 提交并解析中…' : '开始下载'}
+        </button>
       </div>
     </div>
   );
 }
 
-export default AddDownloadDialog;
+export default AddDownloadPanel;

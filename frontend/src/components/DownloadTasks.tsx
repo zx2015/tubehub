@@ -15,7 +15,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { useSSE } from '../hooks/useSSE';
 import type { DownloadTaskRead } from '../types';
-import AddDownloadDialog from './AddDownloadDialog';
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '等待中',
@@ -168,7 +167,6 @@ export function DownloadTasks() {
   const { data, loading, error, reload } = useApi<DownloadTaskRead[]>(
     '/api/downloads',
   );
-  const [addOpen, setAddOpen] = useState(false);
 
   const handleCancel = async (id: number) => {
     try {
@@ -208,13 +206,6 @@ export function DownloadTasks() {
           <button type="button" className="btn btn--ghost" onClick={reload}>
             🔄 刷新
           </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => setAddOpen(true)}
-          >
-            <span>＋</span> 新增下载
-          </button>
         </div>
       </header>
 
@@ -228,7 +219,7 @@ export function DownloadTasks() {
         <div className="downloads__empty">
           <p className="downloads__empty-icon">📥</p>
           <h3>暂无下载任务</h3>
-          <p>点击右上角的「新增下载」开始您的第一个 YouTube 视频离线备灾。</p>
+          <p>点击右下角的「📥 快速下载」悬浮面板，即可开启您的第一个 YouTube 视频离线备灾。</p>
         </div>
       )}
 
@@ -245,12 +236,6 @@ export function DownloadTasks() {
           ))}
         </ul>
       )}
-
-      <AddDownloadDialog
-        open={addOpen}
-        onClose={() => setAddOpen(false)}
-        onCreated={reload}
-      />
     </div>
   );
 }
