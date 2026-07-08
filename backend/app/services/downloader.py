@@ -107,7 +107,6 @@ def select_dynamic_format(info_dict: dict, requested_quality: str) -> str:
 
 def build_ydl_opts(
     task: DownloadTask,
-    proxy_url: str | None,
     cookies_path: str | None,
     output_dir: str,
     dynamic_format: str = "best"
@@ -122,7 +121,6 @@ def build_ydl_opts(
         "noplaylist": True,
         "writethumbnail": False,                 # 缩略图由后端单独下载（走代理）
 
-        "proxy": proxy_url,
         "cookiefile": cookies_path,
         
         # 绕过 PO-Token 安全限制
@@ -355,16 +353,11 @@ async def run_download_worker(task_id: int) -> None:
 
             await update_task_status(task_id, "downloading")
 
-            # 拉取运行时配置（proxy / cookies）
-            proxy_cfg = await SettingsService.get_proxy()
-            proxy_url = (
-                f"{proxy_cfg['scheme']}://{proxy_cfg['host']}:{proxy_cfg['port']}"
-                if proxy_cfg.get("enabled") else None
-            )
+            # 仅拉取 cookies，代理自动由环境变量捕获
             cookies_path = "data/cookies.txt" if os.path.exists("data/cookies.txt") else None
 
-            ydl_opts = build_ydl_opts(task, proxy_url, cookies_path, DATA_DIR)
-            logger.info(f"Task {task_id} download config locked - Proxy URL: {proxy_url or 'None (Direct)'}, Cookies: {'data/cookies.txt' if cookies_path else 'None'}")
+            ydl_opts = build_ydl_opts(task, cookies_path, DATA_DIR)
+            logger.info(f"Task {task_id} download config locked - Cookies: {'data/cookies.txt' if cookies_path else 'None'} (env HTTP_PROXY active)")
             CancellableYDL = make_cancellable_ydl(cancel_event)
 
             loop = asyncio.get_running_loop()

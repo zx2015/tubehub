@@ -50,27 +50,6 @@ export interface DownloadTaskRead {
   finished_at: string | null;
 }
 
-export type ProxyScheme = 'http' | 'https' | 'socks5';
-
-export interface ProxyConfigPublic {
-  enabled: boolean;
-  scheme: ProxyScheme;
-  host: string;
-  port: number;
-  username: string;
-}
-
-export interface ProxyConfig extends ProxyConfigPublic {
-  password: string;
-}
-
-export interface ProxyTestResponse {
-  ok: boolean;
-  latency_ms: number | null;
-  status_code: number | null;
-  error: string | null;
-}
-
 export interface CookieStatus {
   has_cookie: boolean;
   updated_at: string | null;

@@ -1,7 +1,5 @@
-import json
 import os
 from datetime import datetime
-from sqlalchemy import select
 from app.database import AsyncSessionLocal
 from app.models import SystemSetting
 
@@ -9,28 +7,6 @@ COOKIES_FILE_PATH = "data/cookies.txt"
 
 
 class SettingsService:
-    @staticmethod
-    async def get_proxy() -> dict:
-        """获取代理配置，若不存在返回默认禁用配置"""
-        async with AsyncSessionLocal() as db:
-            setting = await db.get(SystemSetting, "ytdlp_proxy")
-            if not setting:
-                return {"enabled": False, "scheme": "http", "host": "", "port": 7890}
-            return json.loads(setting.value)
-
-    @staticmethod
-    async def set_proxy(proxy_cfg: dict) -> None:
-        """保存代理配置"""
-        async with AsyncSessionLocal() as db:
-            setting = await db.get(SystemSetting, "ytdlp_proxy")
-            val = json.dumps(proxy_cfg)
-            if not setting:
-                db.add(SystemSetting(key="ytdlp_proxy", value=val))
-            else:
-                setting.value = val
-                setting.updated_at = datetime.utcnow()
-            await db.commit()
-
     @staticmethod
     async def get_cookies_status() -> dict:
         """获取 Cookie 文件状态"""

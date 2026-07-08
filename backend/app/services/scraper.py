@@ -4,7 +4,7 @@ scraper.py — 核心元数据提取服务。
 职责：
 - 在任务入库（POST /api/downloads）前，使用 yt-dlp 快速抓取视频/歌单格式、Title、Thumbnail URL 
 - 自适应处理单视频与 Playlists (扁平抓取)
-- 自动集成 SettingsService 中的代理和 cookies，保证前置解析安全畅通
+- 自动集成 SettingsService 中的 cookies 绕过安全限制，全局代理由系统环境变量隐式捕获
 """
 import asyncio
 from loguru import logger
@@ -25,12 +25,7 @@ class ScraperService:
         """
         loop = asyncio.get_running_loop()
 
-        # 1. 动态获取代理与 cookies 配置
-        proxy_cfg = await SettingsService.get_proxy()
-        proxy_url = (
-            f"{proxy_cfg['scheme']}://{proxy_cfg['host']}:{proxy_cfg['port']}"
-            if proxy_cfg.get("enabled") else None
-        )
+        # 1. 仅动态获取 cookies 配置（代理自动由系统环境变量 HTTP_PROXY 捕获，无需手动传入 ydl_opts）
         cookies_status = await SettingsService.get_cookies_status()
         cookies_path = "data/cookies.txt" if cookies_status.get("has_cookie", False) else None
 
@@ -39,7 +34,6 @@ class ScraperService:
             "quiet": True,
             "no_warnings": True,
             "noplaylist": False,
-            "proxy": proxy_url,
             "cookiefile": cookies_path,
 
             # 绕过 PO-Token 安全限制
@@ -59,7 +53,7 @@ class ScraperService:
                 return ydl.extract_info(url, download=False)
 
         try:
-            logger.info(f"Scraper: fetching metadata for {url} via proxy: {proxy_url or 'Direct'}")
+            logger.info(f"Scraper: fetching metadata for {url} (env HTTP_PROXY auto-active)")
             info = await loop.run_in_executor(None, _sync_extract)
             return info
         except Exception as e:

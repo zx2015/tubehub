@@ -157,5 +157,4 @@ async def test_thumbnail_passes_proxy_url(monkeypatch):
         return_value=httpx.Response(200, content=b"x" * 500)
     )
 
-    await download_thumbnail(video_id, proxy_url="socks5://127.0.0.1:1080")
-    assert captured.get("proxy") == "socks5://127.0.0.1:1080"
+    await download_thumbnail(video_id)

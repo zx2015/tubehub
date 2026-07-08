@@ -2,14 +2,22 @@ version: "3.9"
 
 services:
   tubehub:
-    build: .
+    build:
+      context: .
+      args:
+        - http_proxy=${HTTP_PROXY}
+        - https_proxy=${HTTPS_PROXY}
     container_name: tubehub
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
+      # 1. 必须挂载整个项目目录以包含 .git 执行 git pull 自动更新
+      - .:/app
+      # 2. 映射数据、日志与前端
       - ./data:/app/data
       - ./logs:/app/logs
+      - ./frontend/dist:/app/static:ro
     environment:
       - SECRET_KEY=${SECRET_KEY:?required}
       - DATABASE_URL=sqlite+aiosqlite:///./data/tubehub.db
@@ -18,9 +26,13 @@ services:
       - THUMBNAILS_DIR=/app/data/thumbnails
       - LOGS_DIR=/app/logs
       - MAX_CONCURRENT_DOWNLOADS=2
+      # 3. 统一全局网络代理环境变量
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+      - NO_PROXY=localhost,127.0.0.1
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 45s

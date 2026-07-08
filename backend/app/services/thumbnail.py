@@ -1,54 +1,26 @@
 """
-YouTube 缩略图下载服务
+YouTube 缩略图下载服务 (极简自愈版)
 
 - 降级链 hqdefault → mqdefault → default
-- 已缓存文件直接复用，不发请求
-- 响应字节数 < 1024 视为 YouTube 占位图，丢弃并尝试下一个 size
-- 全部失败时返回静态占位图路径，由前端兜底渲染
-- httpx.AsyncClient 透传 proxy_url，与 yt-dlp 走同一代理
-
-参考：
-- docs/design/03-yt-dlp-integration.md §3.4
-- docs/requirements/03-library.md §3.1.3
+- 全局代路由系统环境变量 HTTP_PROXY 隐式捕获，httpx.AsyncClient 会自动应用，无需手动传参
 """
-
 import logging
 import os
-
 import httpx
 
 logger = logging.getLogger(__name__)
 
-# 缩略图本地缓存目录（相对仓库根；data/ 在 .gitignore 中）
 THUMBNAIL_DIR = "data/thumbnails"
-
-# 降级链顺序：高质量 → 中质量 → 最低保障
 SIZES_TRY_ORDER = ["hqdefault", "mqdefault", "default"]
-
-# 全部失败时的占位图（前端静态资源路径）
 PLACEHOLDER = "static/placeholder-thumbnail.jpg"
-
-# YouTube 占位图通常 < 1KB，过滤阈值（字节）
 MIN_VALID_SIZE = 1024
-
-# 单次请求超时（秒）
 _REQUEST_TIMEOUT = 10.0
 
 
-async def download_thumbnail(
-    video_id: str,
-    proxy_url: str | None = None,
-) -> str:
+async def download_thumbnail(video_id: str) -> str:
     """下载 YouTube 缩略图到本地缓存。
 
-    Args:
-        video_id: 11 位 YouTube 视频 ID。
-        proxy_url: 可选 SOCKS5/HTTP 代理 URL，透传给 httpx。
-
-    Returns:
-        缩略图相对路径：
-        - 命中本地缓存或任意 size 成功落盘时：`data/thumbnails/{video_id}.jpg`
-        - 全部失败时：`static/placeholder-thumbnail.jpg`
+    由本地环境变量 HTTP_PROXY 自动捕获提供代理。
     """
     os.makedirs(THUMBNAIL_DIR, exist_ok=True)
     save_path = os.path.join(THUMBNAIL_DIR, f"{video_id}.jpg")
@@ -61,8 +33,8 @@ async def download_thumbnail(
     for size in SIZES_TRY_ORDER:
         url = f"https://img.youtube.com/vi/{video_id}/{size}.jpg"
         try:
+            # httpx.AsyncClient 会全自动、隐式应用系统环境变量中的 HTTP_PROXY / HTTPS_PROXY
             async with httpx.AsyncClient(
-                proxy=proxy_url,
                 timeout=_REQUEST_TIMEOUT,
                 follow_redirects=True,
             ) as client:
