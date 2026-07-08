@@ -8,13 +8,13 @@ import time
 import httpx
 from fastapi import APIRouter, Body
 
-from ..schemas.settings import (
+from app.schemas.settings import (
     CookieStatus,
     ProxyConfig,
     ProxyConfigPublic,
     ProxyTestResponse,
 )
-from ..services.settings import SettingsService
+from app.services.settings import SettingsService
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 

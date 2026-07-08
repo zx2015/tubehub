@@ -10,9 +10,9 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
-from ..deps import get_db
-from ..models import Video, PlayHistory
-from ..schemas.video import (
+from app.deps import get_db
+from app.models import Video, PlayHistory
+from app.schemas.video import (
     VideoRead,
     VideoProgressUpdate,
     BatchDeleteRequest,

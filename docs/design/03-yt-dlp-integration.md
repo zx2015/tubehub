@@ -41,9 +41,15 @@ sequenceDiagram
         BE-->>FE: 返回 conflict=false
         FE->>BE: POST /api/downloads { url, overwrite=false }
     end
-    BE->>DB: 写入 download_tasks (状态: queued)
-    BE-->>FE: 返回 201 Created (前端刷新为 queued)
-    
+
+    Note over BE,YTDL: 阶段 ③ v2 重构：先抓元数据再入库
+    BE->>YTDL: ScraperService.fetch_metadata (extract_info 提取真实 title, youtube_id, formats)
+    YTDL-->>BE: 返回完整 info 字典
+    BE->>Thumb: download_thumbnail(youtube_id, proxy_url)
+    Thumb->>FS: 封面提前落盘到 data/thumbnails/
+    BE->>DB: 写入 download_tasks (status=queued, title=真实标题)
+    BE-->>FE: 返回 201 Created (前端刷新为 queued 并展示真实标题与封面)
+
     Note over Sched,YTDL: 调度环每 1 秒轮询 queued 任务
 
     loop 异步下载调度环
@@ -54,7 +60,6 @@ sequenceDiagram
         activate YTDL
         YTDL->>YTDL: 1) extract_info(download=False) 获取格式列表
         YTDL->>YTDL: 2) select_dynamic_format 挑出最佳 format_id
-        YTDL->>DB: 自愈更新视频 Title 字段
         YTDL->>YTDL: 3) extract_info(download=True) 开始真正流下载
         loop 每一分片下载中
             YTDL->>DB: progress_callback 更新 progress/speed/eta
@@ -63,8 +68,6 @@ sequenceDiagram
         end
         YTDL->>YTDL: postprocessor_callback (FFmpeg 合并完成)
         YTDL->>DB: 状态更新: downloading -> merging -> ready
-        YTDL->>Thumb: download_thumbnail(youtube_id) 走代理
-        Thumb->>FS: 下载封面图到 data/thumbnails/
         YTDL->>DB: 写入 videos 主表 (建立 play_history 级联)
         YTDL->>FS: 视频写入 HDD data/videos/{uploader}/
         deactivate YTDL
@@ -81,9 +84,16 @@ sequenceDiagram
 - **API**：`POST /api/downloads/check`。
 - **机制**：后端仅拉取 formats 元信息，探测是否与库中已有视频 ID 冲突。若冲突，前端会拉起覆盖确认对话框，用户点击确认后会携带 `overwrite=true` 执行下载。
 
-#### 阶段 ③ — 任务创建（写入数据库）
+#### 阶段 ③ — 任务创建（v2 重构版：先抓元数据，再入库）
 - **API**：`POST /api/downloads`。
-- **歌单处理**：若是歌单链接，后台会自动 `extract_flat` 解析并将所有子视频扁平地写入 `download_tasks` 表，所有任务状态初置为 `queued`。
+- **新时序（v2）**：
+  1. 接收 URL 后，**首先调用 `ScraperService.fetch_metadata`**（后端线程池内同步执行 `yt-dlp extract_info(download=False)`），获取真实 **`title`**、**`youtube_id`** 与完整 **`formats`**。
+  2. 自动复用运行时代理与 Cookies 突破 PO-Token 风控。
+  3. **立即调用 `thumbnail.download_thumbnail`** 走代理将封面图落盘到 `data/thumbnails/`。
+  4. 携带真实元数据（`title` 已有，`youtube_id` 已有）**写入 `download_tasks` 表**：
+     - **状态**：**`queued`**（不再以空 Title 占位入队）。
+     - **前端效果**：用户添加下载后，立刻能在「下载任务」列表看到真实的视频标题和缩略图，再进入下载器阶段。
+- **歌单处理**：识别 `info['_type'] == 'playlist'` 后，扁平遍历 `entries`，每一首子视频都经历上述"抓元数据 → 抓封面 → 入库 queued"的子流程，互不阻塞。
 
 #### 阶段 ④ — 调度器拾取（asyncio 信号量）
 - **模块**：`services/scheduler.py` 中的 `scheduler_loop()`。

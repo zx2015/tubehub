@@ -5,7 +5,7 @@
 from fastapi import APIRouter
 from sqlalchemy import text
 
-from ..database import AsyncSessionLocal
+from app.database import AsyncSessionLocal
 
 router = APIRouter()
 

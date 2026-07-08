@@ -169,22 +169,25 @@ async def cancel_task(task_id: int):
 
 ---
 
-## 2.3 下载任务状态机（已确认 ✅ 含自动重试）
+## 2.3 下载任务状态机（v2 重构版：先抓元数据，再以 queued 入库）
+
+> 关键变更（2026-07-07 v2 重构）：任务不再以空 Title 占位入队。`POST /api/downloads` 会先调用 ScraperService 拉取真实 title 与 formats，并立即下载缩略图，最后将携带完整元数据的任务以 `queued` 状态入库。
 
 ```
-                        ┌─► Queued (等待调度) ─┐
-                        │                       ▼
-新建 ──► Pending ──────┴─────────────► Downloading ──► Merging ──► Ready
-                │                              │              │
-                ▼                              ▼              ▼
-            Cancelled                       Cancelled       Failed ─┐
-                                                                          │
-                                              ┌───────────────┘
-                                              ▼ retry_count < 3 且未手动
-                                          Queued (自动重试)
-                                              │
-                                              ▼ retry_count == 3
-                                          Failed (终态，可手动重启)
+              ┌──────────► Cancelled
+              │
+URL 提交 ──► (Scraper 抓元数据)
+              │
+              ▼
+           Queued (任务创建) ──► Downloading ──► Merging ──► Ready
+              │                  │                │
+              │                  ▼                ▼
+              │              Cancelled        Failed ─┐
+              │                                            │
+              ▼ 自动重试 (retry_count < 3)                │
+           Queued (退避后)                                │
+                                                           ▼ retry_count == 3
+                                                       Failed (终态，可手动重启)
 
 | 状态 | 说明 | DB 字段 `status` |
 |------|------|------------------|

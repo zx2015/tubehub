@@ -2,8 +2,8 @@ import json
 import os
 from datetime import datetime
 from sqlalchemy import select
-from ..database import AsyncSessionLocal
-from ..models import SystemSetting
+from app.database import AsyncSessionLocal
+from app.models import SystemSetting
 
 COOKIES_FILE_PATH = "data/cookies.txt"
 

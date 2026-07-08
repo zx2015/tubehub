@@ -10,8 +10,8 @@ import asyncio
 import logging
 from sqlalchemy import select
 
-from ..database import AsyncSessionLocal
-from ..models import DownloadTask
+from app.database import AsyncSessionLocal
+from app.models import DownloadTask
 
 logger = logging.getLogger(__name__)
 

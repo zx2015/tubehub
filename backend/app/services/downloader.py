@@ -12,8 +12,8 @@ import logging
 import os
 from datetime import datetime, timedelta
 
-from ..database import AsyncSessionLocal
-from ..models import DownloadTask, Video
+from app.database import AsyncSessionLocal
+from app.models import DownloadTask, Video
 from .scheduler import download_semaphore, cancel_events
 from .settings import SettingsService
 
@@ -66,7 +66,7 @@ def select_dynamic_format(info_dict: dict, requested_quality: str) -> str:
         vcodec = f.get("vcodec") or "none"
         acodec = f.get("acodec") or "none"
         if vcodec != "none" and acodec == "none" and h <= limit_h:
-            video_formats.append(f)
+            video_formats.app.end(f)
 
     # 如果在限制下完全找不到视频轨，放宽限制取能找到的最高
     if not video_formats:
@@ -74,7 +74,7 @@ def select_dynamic_format(info_dict: dict, requested_quality: str) -> str:
             vcodec = f.get("vcodec") or "none"
             acodec = f.get("acodec") or "none"
             if vcodec != "none" and acodec == "none":
-                video_formats.append(f)
+                video_formats.app.end(f)
 
     # 按分辨率+码率对视频轨从低到高排序，取最大值
     best_v_id = None
@@ -88,7 +88,7 @@ def select_dynamic_format(info_dict: dict, requested_quality: str) -> str:
         vcodec = f.get("vcodec") or "none"
         acodec = f.get("acodec") or "none"
         if vcodec == "none" and acodec != "none":
-            audio_formats.append(f)
+            audio_formats.app.end(f)
 
     best_a_id = None
     if audio_formats:
@@ -374,22 +374,17 @@ async def run_download_worker(task_id: int) -> None:
                     # 1. 第一步：先 extract_info(download=False) 获取视频全部格式信息 (相当于 --list-formats 探针)
                     logger.info(f"Task {task_id} pre-fetching metadata for dynamic format selection...")
                     info = ydl.extract_info(task.url, download=False)
-                    
+
                     # 2. 第二步：根据真实的 formats 列表，优选出最贴合高度限制的最佳音视频 format id 组合
                     chosen_format = select_dynamic_format(info, task.quality)
                     logger.info(f"Task {task_id} dynamic format matched - Choice: {chosen_format} (Target: {task.quality})")
-                    
+
                     # 动态更新 ydl_opts['format']
                     ydl.params["format"] = chosen_format
-                    
-                    # 自愈更新任务中的 Title（如果 DB 中 title 为空）
-                    title = info.get("title", "Untitled")
-                    if title:
-                        loop.call_soon_threadsafe(
-                            asyncio.create_task,
-                            update_task_title(task_id, title)
-                        )
-                    
+
+                    # 注意：任务入库时已包含真实 title（前置 API 阶段已抓取），
+                    # 此处不再自愈 Title
+
                     # 3. 第三步：真正启动下载
                     logger.info(f"Task {task_id} starting actual stream download with format: {chosen_format}")
                     return ydl.extract_info(task.url, download=True)
