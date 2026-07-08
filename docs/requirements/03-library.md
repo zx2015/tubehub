@@ -104,8 +104,8 @@ class Video:
     vcodec: str                 # 视频编码（avc1, vp9, av01）
     acodec: str                 # 音频编码（mp4a, opus）
     container: str              # 容器（mp4, mkv, webm）
-    format_type: str            # video | audio（继承自下载任务）
-    quality_label: str          # "1080p", "720p" 等
+    video_format_id: int        # 视频轨 format_id（v3.0 严格 list-formats）
+    audio_format_id: int        # 音频轨 format_id
 
     # 播放进度
     last_position: float        # 上次播放位置（秒）
@@ -168,7 +168,7 @@ def sanitize_filename(name: str, max_length: int = 200) -> str:
 前端: 用户点 "开始下载"
    │
    ▼
-POST /api/downloads/check { url, format_type, quality }
+POST /api/downloads/check { url }
    │
    ▼
 后端用 yt-dlp 解析 URL（不下载），返回 youtube_id + 标题 + 现有记录

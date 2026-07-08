@@ -9,34 +9,72 @@
 | 下载库 | **yt-dlp Python 模块**（在 venv 中通过 `pip install yt-dlp`） |
 | 支持的 URL | YouTube 单视频、YouTube 歌单（多视频批量下载） |
 | 格式与清晰度 | 用户在添加时显式选择（见 §2.2） |
-| 并发策略 | **最多 2 个任务并行**，超出排队等待，详见 [§2.2.3](#223-并发调度已确认) |
+| 并发策略 | **最多 2 个任务并行**，超出排队等待，详见 [§2.2.5](#225-并发调度已确认) |
 | 进度汇报 | 通过 yt-dlp 的 `progress_hooks` 回调实时更新 |
 
-## 2.2 格式与清晰度选项（用户需求 §8）
+## 2.2 视频 + 音频格式选项（用户需求 §8，v3.0 重构）
 
-> 用户在添加下载时需选择，**前端必须提供该对话框**
+> 决策（2026-07-08）：完全重写为「视频格式 + 音频格式」双 select 体系。
+> 所有下拉项均来自 yt-dlp 实时探测的 `formats` 列表（`--list-formats` 完整元数据）。
+> **格式为必选项**，不提供 `/best` 自动降级（因为下拉项都是真实可用 format_id）。
 
-### 2.2.1 格式（format_type）
+### 2.2.1 视频格式（`video_format_id`，必选）
 
-> 决策（2026-07-07）：**专攻视频下载**，不考虑支持下载"仅音频"格式。
+来自 `formats` 中 `vcodec != "none"` 的所有视频轨。完整字段说明：
 
-| 取值 | 说明 |
-|------|------|
-| `video` | 视频 + 音频（自动合并，默认） |
+```json
+{
+  "id": 137,                        // yt-dlp format_id
+  "label": "1080p (mp4 · avc1.640028 · 2.1Mbps)",
+  "ext": "mp4",
+  "vcodec": "avc1.640028",
+  "height": 1080,
+  "width": 1920,
+  "tbr": 2104.5,                    // 总码率 kbps
+  "filesize_approx": 104857600      // 估算字节
+}
+```
 
-### 2.2.2 清晰度（quality）
+### 2.2.2 音频格式（`audio_format_id`，必选）
 
-> 与 yt-dlp 的 format selection 对应
+来自 `formats` 中 `acodec != "none" && vcodec == "none"` 的所有音频轨：
 
-| UI 选项 | yt-dlp `format` 字符串 | 实际画质 |
-|---------|------------------------|----------|
-| `best` | `bestvideo+bestaudio/best` | 最高画质（4K/8K） |
-| `1080p` | `bestvideo[height<=1080]+bestaudio/best[height<=1080]` | 1080p 及以下最高 |
-| `720p` | `bestvideo[height<=720]+bestaudio/best[height<=720]` | 720p 及以下最高 |
-| `480p` | `bestvideo[height<=480]+bestaudio/best[height<=480]` | 480p 及以下最高 |
-| `worst` | `worstvideo+worstaudio/worst` | 最低画质（节省空间） |
+```json
+{
+  "id": 251,                        // yt-dlp format_id
+  "label": "opus (webm · 122kbps · 48kHz)",
+  "ext": "webm",
+  "acodec": "opus",
+  "abr": 122.8,                     // 音频码率 kbps
+  "asr": 48000                      // 采样率
+}
+```
 
-### 2.2.3 并发调度（已确认 ✅）
+### 2.2.3 拼接规则（yt-dlp format 表达式）
+
+```python
+# services/downloader.py
+ydl_opts["format"] = f"{task.video_format_id}+{task.audio_format_id}"
+#   e.g. "137+251"  →  下载 137 视频 + 251 音频，yt-dlp 自动调用 ffmpeg 合并
+#   e.g. "22+140"   →  下载 22 视频 + 140 音频
+```
+
+**yt-dlp 内部行为**（无需手工干预）：
+1. 第一次 HTTP 请求：GET 视频轨文件 (`.mp4`/`.webm`)
+2. 第二次 HTTP 请求：GET 音频轨文件 (`.m4a`/`.webm`)
+3. 自动调用 `ffmpeg` postprocessor 将两段流 **合并** 为一个完整 mp4/mkv 文件
+
+**错误行为**：若 `video_format_id+audio_format_id` 无法合成（比如其中一轨已失效），yt-dlp 会抛出 `Requested format is not available` 异常，任务进入 failed 状态，由自动重试 / 手动重试机制处理。
+
+### 2.2.4 UI 交互
+
+- 检测冲突完成后，UI 自动展开双 select 下拉框。
+- 视频格式 select **默认选中第一个最高分辨率的视频轨**。
+- 音频格式 select **默认选中第一个最高码率的音频轨**。
+- 用户可自由切换，最终选定的两个 id 都会在 POST /api/downloads 中显式提交给后端。
+- 提交按钮名称：**"开始下载"**。
+
+### 2.2.5 并发调度（已确认 ✅）
 
 #### 任务并行上限
 
@@ -207,8 +245,8 @@ class DownloadTask:
     url: str                    # 原始 YouTube URL
     video_id: str               # YouTube video_id（用于关联 Video）
     title: str                  # 任务创建时的标题（可能被更新）
-    format_type: str            # video | audio
-    quality: str                # best | 1080p | 720p | ...
+    video_format_id: int        # 必选视频轨 format_id
+    audio_format_id: int        # 必选音频轨 format_id
     status: str                 # 见上表
     progress: float             # 0.0 - 100.0
     speed: str                  # "1.2 MiB/s"（人类可读）

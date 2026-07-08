@@ -20,19 +20,20 @@
 [首页] → [点 "+ 添加下载" 按钮]
       → 弹出 "新增下载" 对话框
         - 字段 1：YouTube URL（必填，支持单视频/歌单 URL）
-        - 字段 2：格式：视频（默认且仅此选项，裁切仅音频）
-        - 字段 3：清晰度（最高画质 / 1080p / 720p / 480p / 最低）
-        - 字段 4：保存目录（默认 `data/videos/`，可选手动指定）
+        - 字段 2：（v3.0 重构：删除单选"格式 + 清晰度"）
+        - **【🔍 检测冲突】按钮**（v3.0 必点）：
+           → 调用 POST /api/downloads/check 拿 list-formats
+           → 返库冲突 → 提示已存在，停止
+           → 通过 → 自动展开"视频格式"与"音频格式"双下拉
+              ├─ 视频格式 select（来自 list-formats 中 vcodec != none 的所有轨）
+              └─ 音频格式 select（来自 list-formats 中 acodec != none 的所有轨）
+        - 字段 3：保存目录（默认 `data/videos/`，可选手动指定）
       → [点 "开始下载" 按钮]
-      → 前端先调用 POST /api/downloads/check 检测是否重复
-         ├─ 不重复 → 直接 POST /api/downloads 入队
-         └─ 重复 → 弹出"覆盖确认"对话框（详见 [03-library.md §3.4.1](03-library.md)）
-              ├─ 用户取消 → 不发起下载
-              └─ 用户确认 → POST /api/downloads { overwrite: true }
-      → 立即在下载任务页显示新任务（状态：Queued → Downloading）
+         → POST /api/downloads { url, video_format_id, audio_format_id }
+         → 立即在下载任务页显示新任务（状态：Queued → Downloading）
 ```
 
-> **歌单批量下载**：对话框中勾选"按歌单批量下载"时，整组任务一次性入队，**串行**下载（见 [02-downloader.md §2.2.3](02-downloader.md)）。任务列表**扁平展示**，所有子任务与单视频任务混合在同一列表中（每行独立的状态/进度），不分组、不嵌套展开。
+> **歌单批量下载**：对话框中勾选"按歌单批量下载"时，整组任务一次性入队，**串行**下载（见 [02-downloader.md §2.2.5](02-downloader.md)）。任务列表**扁平展示**，所有子任务与单视频任务混合在同一列表中（每行独立的状态/进度），不分组、不嵌套展开。
 
 ### 1.2.2 下载进度展示（需求 §2）
 

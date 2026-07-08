@@ -108,8 +108,8 @@ CREATE TABLE videos (
     vcodec          TEXT,
     acodec          TEXT,
     container       TEXT,
-    format_type     TEXT,              -- video only（仅视频，已裁切仅音频）
-    quality_label   TEXT,
+    video_format_id INTEGER,           -- v3.0 严格 list-formats
+    audio_format_id INTEGER,
     last_position   REAL DEFAULT 0,
     last_watched_at DATETIME,
     created_at      DATETIME NOT NULL
@@ -125,8 +125,8 @@ CREATE TABLE download_tasks (
     url               TEXT NOT NULL,
     youtube_id        TEXT,
     title             TEXT,
-    format_type       TEXT NOT NULL,
-    quality           TEXT NOT NULL,
+    video_format_id   INTEGER NOT NULL,    -- v3.0 严格 list-formats
+    audio_format_id   INTEGER NOT NULL,
     status            TEXT NOT NULL DEFAULT 'pending',
     progress          REAL DEFAULT 0,
     speed             TEXT,

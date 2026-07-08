@@ -6,8 +6,8 @@
 
 | 模块 | Method | Path | 用途 |
 |------|--------|------|------|
-| **下载** | POST | `/api/downloads/check` | 前置 check：检测 URL 是否已在库中 |
-| | POST | `/api/downloads` | 创建下载任务（支持单视频/歌单批量） |
+| **下载** | POST | `/api/downloads/check` | 🔍 检测冲突 (v3.0：返回 list-formats 的 video/audio 列表) |
+| | POST | `/api/downloads` | 创建下载任务（支持单视频/歌单批量），提交 video_format_id + audio_format_id |
 | | GET | `/api/downloads` | 列出任务（支持 status 过滤） |
 | | GET | `/api/downloads/{id}` | 任务详情 |
 | | DELETE | `/api/downloads/{id}` | 取消/删除任务 |
@@ -48,9 +48,30 @@ class DownloadCheckRequest(BaseModel):
 class ExistingVideoInfo(BaseModel):
     id: int
     title: str
-    quality_label: Optional[str]
+    video_format_id: Optional[int]
+    audio_format_id: Optional[int]
     file_size: int
     last_position: float
+
+
+class VideoFormatOption(BaseModel):
+    """前端下拉框中的一项视频格式。id 即 yt-dlp format_id。"""
+    id: int
+    label: str          # 人类可读："{height}p ({ext} · {vcodec} · {tbr:.0f}kbps)"
+    ext: str
+    height: Optional[int] = None
+    vcodec: Optional[str] = None
+    tbr: Optional[float] = None        # 总码率 kbps
+
+
+class AudioFormatOption(BaseModel):
+    """前端下拉框中的一项音频格式。id 即 yt-dlp format_id。"""
+    id: int
+    label: str          # 人类可读："{acodec} ({ext} · {abr:.0f}kbps · {asr/1000:.0f}kHz)"
+    ext: str
+    acodec: Optional[str] = None
+    abr: Optional[float] = None
+    asr: Optional[int] = None         # 采样率 Hz
 
 
 class DownloadCheckResponse(BaseModel):
@@ -61,14 +82,17 @@ class DownloadCheckResponse(BaseModel):
     is_playlist: bool = False
     playlist_entries: Optional[list[dict]] = None
     existing_video: Optional[ExistingVideoInfo] = None
+    # v3.0 重构：list-formats 结果
+    video_formats: list[VideoFormatOption] = []
+    audio_formats: list[AudioFormatOption] = []
 
 
 class DownloadCreateRequest(BaseModel):
+    """v3.0 重构：双 format_id 严格来自 list-formats"""
     url: HttpUrl
-    format_type: Literal["video"] = "video"     # 已裁切仅音频
-    quality: Literal["best", "1080p", "720p", "480p", "worst"]
+    video_format_id: int        # 视频轨 format_id
+    audio_format_id: int        # 音频轨 format_id
     overwrite: bool = False
-    download_subtitles: bool = False             # 字幕已确认不做，预留
 
 
 class DownloadTaskRead(BaseModel):
@@ -76,8 +100,9 @@ class DownloadTaskRead(BaseModel):
     url: str
     youtube_id: Optional[str]
     title: Optional[str]
-    format_type: str
-    quality: str
+    # v3.0：使用双 format_id
+    video_format_id: Optional[int]
+    audio_format_id: Optional[int]
     status: str
     progress: float
     speed: Optional[str]
@@ -107,7 +132,8 @@ class VideoRead(BaseModel):
     file_size: Optional[int]
     width: Optional[int]
     height: Optional[int]
-    quality_label: Optional[str]
+    video_format_id: Optional[int]
+    audio_format_id: Optional[int]
     last_position: float = 0
     last_watched_at: Optional[datetime]
     created_at: datetime

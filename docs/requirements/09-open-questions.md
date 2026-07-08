@@ -18,11 +18,12 @@
 | # | 决策 | 取值 | 落地位置 |
 |---|------|------|----------|
 | Q1 | 前端框架 | React 18 + Vite + TypeScript + Vanilla CSS | [01-frontend.md §1.4](01-frontend.md) |
-| Q2 | 歌单下载行为 | 串行下载 + 任务列表扁平展示（不分组） | [02-downloader.md §2.2.3](02-downloader.md) |
+| Q2 | 歌单下载行为 | 串行下载 + 任务列表扁平展示（不分组） | [02-downloader.md §2.2.5](02-downloader.md) |
 | Q3 | 重新下载行为 | 默认覆盖 + 前置 check + 弹窗确认 | [03-library.md §3.4](03-library.md) |
 | Q4 | 视频文件命名 | `{uploader}/{title}[{youtube_id}].{ext}` | [03-library.md §3.3](03-library.md) |
 | Q5 | 失败重试策略 | 自动重试 3 次后置为 Failed，可手动重启 | [02-downloader.md §2.8](02-downloader.md) |
-| Q5+ | 任务并发上限 | 最多 2 个并行，超出 queued FIFO | [02-downloader.md §2.2.3](02-downloader.md) |
+| Q5+ | 任务并发上限 | 最多 2 个并行，超出 queued FIFO | [02-downloader.md §2.2.5](02-downloader.md) |
+| **Q25 (v3.0)** | 新增下载流程 | 「🔍 检测冲突」按钮 + 「视频格式 + 音频格式」双 select，严格按 list-formats 动态生成 | [02-downloader.md §2.2.2](02-downloader.md) |
 | Q6 | HLS 分片（4K/8K） | MVP 不做，记录未来路线 | [04-player.md §4.6](04-player.md) |
 | Q7 | 元数据编辑 | MVP 不做（仅展示） | [03-library.md §3.8.1](03-library.md) |
 | Q8 | 历史保留策略 | 30 天自动清理（仅 play_history） | [05-history.md §5.6](05-history.md) |
@@ -38,7 +39,7 @@
 | Q23 | 视频删除 UI | 单删 + 批量删 + 确认弹窗 | [03-library.md §3.9](03-library.md) |
 | Q24 | 下载代理配置 | HTTP/HTTPS/SOCKS5，可测试连通性 | [07-backend.md §7.3.2](07-backend.md) |
 | **N1** | **前端播放器** | **video.js 8.x** | **[04-player.md §4.4](04-player.md)** |
-| **N2** | **调度器实现** | **`asyncio.create_task` 循环 + `Semaphore(2)`** | **[02-downloader.md §2.2.3](02-downloader.md)** |
+| **N2** | **调度器实现** | **`asyncio.create_task` 循环 + `Semaphore(2)`** | **[02-downloader.md §2.2.5](02-downloader.md)** |
 | **N3** | **音频格式** | **裁切，不支持"仅音频"下载** | **[02-downloader.md §2.2.1](02-downloader.md)** |
 | **N4** | **已观看阈值** | **`position > 5s 且 < duration × 0.95`** | **[05-history.md §5.3.3](05-history.md)** |
 | **N5** | **视频库默认排序** | **最新添加优先（`created_at DESC`）** | **[01-frontend.md §1.2.3](01-frontend.md)** |

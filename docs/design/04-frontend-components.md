@@ -201,35 +201,42 @@ sequenceDiagram
     Page->>API: PATCH /progress (最后一次)
 ```
 
-## 4.7 AddDownloadDialog 流程
+## 4.7 AddDownloadDialog 流程 (v3.0 重构：双 select + 🔍 检测冲突)
 
 ```typescript
-const handleAddDownload = async (url: string, quality: string) => {
-  // 1. 前置 check
-  const check = await fetch('/api/downloads/check', {
+// 1. 用户输入 URL 后点击 [🔍 检测冲突]
+const handleProbe = async (url: string) => {
+  const probe = await fetch('/api/downloads/check', {
     method: 'POST',
     body: JSON.stringify({ url })
   }).then(r => r.json());
 
-  if (check.conflict) {
-    // 2. 弹出覆盖确认
-    const confirmed = await openConfirmDialog({
-      title: '视频已存在',
-      message: `《${check.existing_video.title}》已在库中。是否覆盖？`,
-    });
-    if (!confirmed) return;
+  if (probe.conflict) {
+    // 命中数据库已存在：弹"已存在"确认框，覆盖才继续
+    const ok = await openConfirmDialog({ ... });
+    if (!ok) return;
   }
 
-  // 3. 提交任务
+  // 返回 list-formats 动态生成的 video_formats / audio_formats
+  setVideoFormats(probe.video_formats); // [{id:137, label:"1080p mp4"}, ...]
+  setAudioFormats(probe.audio_formats); // [{id:251, label:"webm 122k opus"}, ...]
+};
+
+// 2. 用户在「视频格式」与「音频格式」双 select 中选择完，点 [开始下载]
+const handleStartDownload = async (
+  url: string,
+  videoFormatId: number,
+  audioFormatId: number,
+  overwrite: boolean
+) => {
   await fetch('/api/downloads', {
     method: 'POST',
     body: JSON.stringify({
-      url, quality,
-      overwrite: check.conflict && confirmed,
+      url, video_format_id: videoFormatId, audio_format_id: audioFormatId, overwrite,
     }),
   });
 
-  toast.success('下载任务已添加');
+  toast.success('下载任务已添加，状态 Queued');
 };
 ```
 

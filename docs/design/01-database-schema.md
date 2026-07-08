@@ -60,8 +60,7 @@ class Video(Base):
     vcodec = Column(String(32))
     acodec = Column(String(32))
     container = Column(String(16))
-    format_type = Column(String(16), default="video")
-    quality_label = Column(String(32))
+    video_format_id = Column(Integer)       # 选择的视频轨 f ... [HISTORICAL_ARG_TRUNCATED_LEN_191] ... dio_format_id = Column(Integer)       # 选择的音频轨 format_id
 
     last_position = Column(Float, default=0)
     last_watched_at = Column(DateTime)
@@ -87,8 +86,8 @@ class DownloadTask(Base):
     url = Column(Text, nullable=False)
     youtube_id = Column(String(16), index=True)
     title = Column(String(512))
-    format_type = Column(String(16), nullable=False)
-    quality = Column(String(16), nullable=False)
+    video_format_id = Column(Integer, nullable=False)  # 必选视频轨 format_id
+    audio_format_id = Column(Integer, nullable=False)  # 必选音频轨 format_id
 
     status = Column(String(16), nullable=False, default="pending", index=True)
     progress = Column(Float, default=0)
@@ -99,6 +98,12 @@ class DownloadTask(Base):
 
     error_message = Column(Text)
     save_path = Column(Text)
+
+    # 03 §3.0.1 阶段 ② v3.0 重构：双 format_id 字段
+    #   这两个 id 均来自 yt-dlp extract_info(download=False) 返回的 formats 列表
+    #   可空以兼容 v2.x 及更早历史任务
+    video_format_id = Column(Integer, nullable=True, comment="yt-dlp 视频轨 format_id，如 137")
+    audio_format_id = Column(Integer, nullable=True, comment="yt-dlp 音频轨 format_id，如 251")
 
     # 02 §2.8 自动重试字段
     retry_count = Column(Integer, default=0)

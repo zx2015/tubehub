@@ -28,26 +28,29 @@ sequenceDiagram
     participant Thumb as thumbnail.py
 
     User->>FE: 点击 [+ 新增下载] 输入 URL
-    FE->>BE: POST /api/downloads/check { url }
-    BE->>YTDL: extract_info(url, download=False)
-    YTDL-->>BE: 返回 formats / video_id / title
-    BE->>DB: 检查库中是否已有此视频 id
+    FE->>BE: POST /api/downloads/check { url } (🔍 检测冲突按钮)
+    BE->>DB: 查询 videos.youtube_id 是否已存在
     alt 视频已存在 (Conflict)
+        DB-->>BE: 命中
         BE-->>FE: 返回 conflict=true + existing_video
-        FE->>User: 弹出覆盖确认弹窗
-        User->>FE: 点击 "确认覆盖"
-        FE->>BE: POST /api/downloads { url, overwrite=true }
+        FE->>User: 弹出"已存在"对话框，停止后续步骤
     else 视频不存在 (正常流)
-        BE-->>FE: 返回 conflict=false
-        FE->>BE: POST /api/downloads { url, overwrite=false }
+        DB-->>BE: 未命中
+        BE->>YTDL: ScraperService.fetch_formats(url) [extract_info(download=False)]
+        YTDL-->>BE: 返回完整 formats 列表
+        BE->>BE: 过滤 video-only 与 audio-only
+        BE-->>FE: 返回 video_formats[] + audio_formats[] + title
+        FE->>User: 展开「新建下载任务」窗口，双 select 填充
+        User->>FE: 选择 video_format_id 与 audio_format_id
+        FE->>BE: POST /api/downloads { url, video_format_id, audio_format_id }
     end
 
-    Note over BE,YTDL: 阶段 ③ v2 重构：先抓元数据再入库
-    BE->>YTDL: ScraperService.fetch_metadata (extract_info 提取真实 title, youtube_id, formats)
-    YTDL-->>BE: 返回完整 info 字典
-    BE->>Thumb: download_thumbnail(youtube_id, proxy_url)
+    Note over BE,YTDL: 阶段 ③ v3.0 重构：双 format_id 直接入库
+    BE->>YTDL: ScraperService.fetch_metadata (确认 youtube_id 与 title)
+    YTDL-->>BE: 返回 info 字典
+    BE->>Thumb: download_thumbnail(youtube_id)
     Thumb->>FS: 封面提前落盘到 data/thumbnails/
-    BE->>DB: 写入 download_tasks (status=queued, title=真实标题)
+    BE->>DB: 写入 download_tasks (status=queued, title=真实标题, video_format_id, audio_format_id)
     BE-->>FE: 返回 201 Created (前端刷新为 queued 并展示真实标题与封面)
 
     Note over Sched,YTDL: 调度环每 1 秒轮询 queued 任务
@@ -58,9 +61,9 @@ sequenceDiagram
         Sched->>BE: 状态更新: queued -> downloading
         Sched->>YTDL: run_download_worker(task_id, cancel_event)
         activate YTDL
-        YTDL->>YTDL: 1) extract_info(download=False) 获取格式列表
-        YTDL->>YTDL: 2) select_dynamic_format 挑出最佳 format_id
-        YTDL->>YTDL: 3) extract_info(download=True) 开始真正流下载
+        YTDL->>YTDL: 1) ydl_opts.format = f"{video_id}+{audio_id}"
+        YTDL->>YTDL: 2) extract_info(download=True) 启动分次下载
+        Note over YTDL: 第一次 HTTP: 视频轨<br/>第二次 HTTP: 音频轨<br/>ffmpeg postprocessor: 自动合并
         loop 每一分片下载中
             YTDL->>DB: progress_callback 更新 progress/speed/eta
             FE->>BE: GET /api/downloads/{id}/stream (SSE 订阅)
@@ -78,22 +81,70 @@ sequenceDiagram
 
 #### 阶段 ① — 用户发起（前端 UI）
 - **触发**：用户在「下载任务」页面右上角点击 `[＋ 新增下载]`（已收纳，视频库主页仅作纯净展示）。
-- **参数**：包含 `url`、`quality`（画质，如 `720p`）。
+- **参数**：包含 `url`、以及随后从检测阶段得到的 **`video_format_id`** + **`audio_format_id`**。
 
-#### 阶段 ② — 前置 check（防重机制）
+#### 阶段 ② — 检测冲突（v3.0 重构：拉取真实 list-formats）
 - **API**：`POST /api/downloads/check`。
-- **机制**：后端仅拉取 formats 元信息，探测是否与库中已有视频 ID 冲突。若冲突，前端会拉起覆盖确认对话框，用户点击确认后会携带 `overwrite=true` 执行下载。
+- **按钮 UI 名称**：`🔍 检测冲突`。
+- **机制**（v3.0）：
+  1. **DB 查重**：先查 `videos` 表的 `youtube_id` 字段。命中 → 返回 `conflict=true` + 已有视频信息，**前端立刻弹出"已存在"对话框，停止后续步骤**。
+  2. **未命中 → 调 `ScraperService.fetch_formats(url)`**：
+     - 在 `asyncio.to_thread` 中执行 `yt_dlp.YoutubeDL({"quiet": True}).extract_info(url, download=False)`。
+     - 拿到完整 `formats` 列表后，按以下两条规则过滤：
+       - **视频轨**：`vcodec != "none"`（包括 `acodec != "none"` 的 progressive 单流，但 UI 标注清楚）
+       - **音频轨**：`acodec != "none" && vcodec == "none"`
+     - 对每个轨生成人类可读 `label`：
+       - 视频轨：`"{height}p ({ext} · {vcodec} · {tbr:.0f}kbps)"`
+       - 音频轨：`"{acodec} ({ext} · {abr:.0f}kbps · {asr/1000:.0f}kHz)"`
+  3. **返回响应**：
+     ```json
+     {
+       "conflict": false,
+       "youtube_id": "nwMKuChwpMo",
+       "title": "【漫士】所以，到底什么是傅里叶变换？",
+       "duration": 1567,
+       "uploader": "漫士AcadMan",
+       "thumbnail_url": "https://...",
+       "video_formats": [
+         { "id": 137, "label": "1080p (mp4 · avc1.640028 · 2104kbps)", "ext": "mp4", "height": 1080, "vcodec": "avc1.640028", "tbr": 2104.5 },
+         ...
+       ],
+       "audio_formats": [
+         { "id": 251, "label": "opus (webm · 122kbps · 48kHz)", "ext": "webm", "acodec": "opus", "abr": 122.8, "asr": 48000 },
+         ...
+       ]
+     }
+     ```
+  4. **前端拿到响应后**：自动展开「新建下载任务」窗口，两个 select 下拉框已经填好过滤后的数据。
+  5. **默认值**：视频 select 默认选 `video_formats[0]`（最高分辨率），音频 select 默认选 `audio_formats[0]`（最高码率）。
 
-#### 阶段 ③ — 任务创建（v2 重构版：先抓元数据，再入库）
+#### 阶段 ③ — 任务创建（v3.0：携带 format_id 直接入库）
 - **API**：`POST /api/downloads`。
-- **新时序（v2）**：
-  1. 接收 URL 后，**首先调用 `ScraperService.fetch_metadata`**（后端线程池内同步执行 `yt-dlp extract_info(download=False)`），获取真实 **`title`**、**`youtube_id`** 与完整 **`formats`**。
-  2. 自动复用运行时代理与 Cookies 突破 PO-Token 风控。
-  3. **立即调用 `thumbnail.download_thumbnail`** 走代理将封面图落盘到 `data/thumbnails/`。
-  4. 携带真实元数据（`title` 已有，`youtube_id` 已有）**写入 `download_tasks` 表**：
-     - **状态**：**`queued`**（不再以空 Title 占位入队）。
-     - **前端效果**：用户添加下载后，立刻能在「下载任务」列表看到真实的视频标题和缩略图，再进入下载器阶段。
-- **歌单处理**：识别 `info['_type'] == 'playlist'` 后，扁平遍历 `entries`，每一首子视频都经历上述"抓元数据 → 抓封面 → 入库 queued"的子流程，互不阻塞。
+- **请求体**：
+  ```json
+  {
+    "url": "https://www.youtube.com/watch?v=nwMKuChwpMo",
+    "video_format_id": 137,
+    "audio_format_id": 251
+  }
+  ```
+- **新时序（v3.0）**：
+  1. 接收请求后，**仍然先调用 `ScraperService.fetch_metadata`** 拿到真实 `title` 与 `youtube_id`（用于自愈与入库）。
+  2. 自动调用 `thumbnail.download_thumbnail` 走代理将封面图落盘。
+  3. **写入 `download_tasks` 表**：
+     - `video_format_id` = 137
+     - `audio_format_id` = 251
+     - `status` = **`queued`**
+     - `title` 真实值
+  4. **调度器拾取时**：直接用 `{video_format_id}+{audio_format_id}` 拼接 yt-dlp format 表达式：
+     ```python
+     ydl_opts["format"] = f"{task.video_format_id}+{task.audio_format_id}"
+     ```
+  5. **yt-dlp 内部行为**：
+     - 第一次 HTTP 请求：下载 137 视频轨
+     - 第二次 HTTP 请求：下载 251 音频轨
+     - 自动 postprocessor 调用 `ffmpeg` 合并为一个 mp4
+- **歌单处理**：识别 `info['_type'] == 'playlist'` 后，扁平遍历 `entries`，对每个 entry 调一次 `fetch_formats` 拿其专有 formats，再入库；用户可在「新建下载任务」窗口中为每个 entry 单独选 format。
 
 #### 阶段 ④ — 调度器拾取（asyncio 信号量）
 - **模块**：`services/scheduler.py` 中的 `scheduler_loop()`。
@@ -187,37 +238,40 @@ async def lifespan(app: FastAPI):
 
 ## 3.3 下载器设计（downloader.py）
 
-### 3.3.1 构造 yt-dlp 选项
+### 3.3.1 构造 yt-dlp 选项 (v3.0 双 format_id 严格模式)
 
 ```python
 def build_ydl_opts(
     task: DownloadTask,
-    proxy_url: str | None,
     cookies_path: str | None,
     output_dir: str,
 ) -> dict:
-    """根据任务配置构造 yt-dlp 选项"""
-    quality_map = {
-        "best":   "bestvideo+bestaudio/best",
-        "1080p":  "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-        "720p":   "bestvideo[height<=720]+bestaudio/best[height<=720]",
-        "480p":   "bestvideo[height<=480]+bestaudio/best[height<=480]",
-        "worst":  "worstvideo+worstaudio/worst",
-    }
+    """根据任务配置构造 yt-dlp 选项（v3.0）"""
+    # 严格按 list-formats 拿到的 format_id 拼接：
+    #   e.g. format="137+251"  -> 先下视频轨 137，再下音频轨 251，
+    #                                  FFmpeg 自动合并
+    format_expr = f"{task.video_format_id}+{task.audio_format_id}"
 
     return {
-        "format": quality_map[task.quality],
-        "merge_output_format": "mp4",
+        "format": format_expr,        # ❌ 不再使用 /best 兜底
+        "merge_output_format": "mp4", # 输出容器强制 mp4
         "outtmpl": f"{output_dir}/%(uploader)s/%(title)s [%(id)s].%(ext)s",
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "writethumbnail": False,                 # 缩略图由后端单独下载（走代理）
+        "writethumbnail": False,     # 缩略图由后端单独下载
 
-        "proxy": proxy_url,
         "cookiefile": cookies_path,
+        # 代理由 .env HTTP_PROXY 全局环境变量自动注入，无需手填
 
-        # 钩子：进度 + 后处理
+        # 绕过 PO-Token 限制
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["tv", "android", "web"],
+            }
+        },
+
+        # 钩子
         "progress_hooks": [lambda d: progress_callback(d, task.id)],
         "postprocessor_hooks": [lambda d: postprocessor_callback(d, task.id)],
     }
