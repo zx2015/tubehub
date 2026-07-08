@@ -815,44 +815,36 @@ button {
 }
 
 
+
+
 /* ==========================================
-   Gmail/写信窗风格：右下角快速下载悬浮窗 (Floating Panel)
+   页面最顶层常驻：经典遮罩悬浮互动窗口 (Modal with Backdrop)
    ========================================== */
 
-/* 1. 常驻右下角的悬浮触发气泡 */
-.floating-trigger {
+/* 1. 半透明黑色遮罩层：强行盖在系统一切卡片、侧边栏上方 */
+.add-download-backdrop {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
-  height: 48px;
-  padding: 0 24px;
-  background-color: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: var(--radius-full);
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.7);  /* 经典半透明遮罩 */
+  backdrop-filter: blur(4px);            /* 现代磨砂毛玻璃 */
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: var(--shadow-2);
-  transition: all var(--transition);
-  z-index: 999;
+  justify-content: center;
+  z-index: 99999 !important;             /* 保证最高优先级覆盖 */
+  animation: fadeIn 0.15s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
-.floating-trigger:hover {
-  background-color: var(--accent-hover);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(255, 0, 0, 0.4);
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-/* 2. 悬浮窗主体 */
-.floating-panel {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  width: 380px;
+/* 2. 浮动在屏幕中央的交互主窗口 */
+.add-download-window {
+  width: 440px;
   background-color: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -860,106 +852,67 @@ button {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  z-index: 1000;
-  animation: slideUp var(--transition) forwards;
+  animation: zoomIn 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
-@keyframes slideUp {
-  from { transform: translateY(20px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+@keyframes zoomIn {
+  from { transform: scale(0.95) translateY(10px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
 }
 
-/* 最小化折叠态 */
-.floating-panel--minimized {
-  width: 300px;
-  border-color: var(--border-light);
-}
-
-.floating-panel--minimized .floating-panel__header {
-  border-bottom: none;
-  cursor: pointer;
-}
-
-/* 头部 Header */
-.floating-panel__header {
+/* 顶部标题栏 */
+.add-download-window__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 48px;
-  padding: 0 16px;
+  height: 52px;
+  padding: 0 20px;
   background-color: #1f1f1f;
   border-bottom: 1px solid var(--border-light);
-  user-select: none;
 }
 
-.floating-panel__brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.floating-panel__title-icon {
-  font-size: 16px;
-}
-
-.floating-panel__title-text {
-  font-size: 14px;
-  font-weight: 600;
+.add-download-window__title {
+  font-size: 15px;
+  font-weight: 700;
   color: var(--fg);
+  margin: 0;
 }
 
-.floating-panel__minimized-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--fg-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  margin-right: 8px;
-}
-
-/* 控制按钮组 (➕, ➖, ❌) */
-.floating-panel__controls {
-  display: flex;
-  gap: 4px;
-}
-
-.floating-panel__controls button {
+.add-download-window__close {
   background: transparent;
   border: none;
   color: var(--fg-secondary);
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
   cursor: pointer;
+  font-size: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
   transition: background-color var(--transition);
 }
 
-.floating-panel__controls button:hover {
+.add-download-window__close:hover {
   background-color: rgba(255, 255, 255, 0.1);
   color: var(--fg);
 }
 
-/* 浮动窗主体区 */
-.floating-panel__body {
-  padding: 16px;
+/* 主体表单区 */
+.add-download-window__body {
+  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
-.floating-panel__field {
+.add-download-window__field {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.floating-panel__field label {
+.add-download-window__field label {
   font-size: 11px;
   font-weight: 600;
   color: var(--fg-secondary);
@@ -967,13 +920,13 @@ button {
   letter-spacing: 0.5px;
 }
 
-.floating-panel__field input[type="url"],
-.floating-panel__field input[type="text"],
-.floating-panel__field select {
+.add-download-window__field input[type="url"],
+.add-download-window__field input[type="text"],
+.add-download-window__field select {
   background-color: var(--bg);
   border: 1px solid var(--border);
   color: var(--fg);
-  height: 36px;
+  height: 38px;
   padding: 0 12px;
   border-radius: var(--radius-sm);
   font-size: 13px;
@@ -982,42 +935,42 @@ button {
   transition: border-color var(--transition);
 }
 
-.floating-panel__field input:focus,
-.floating-panel__field select:focus {
+.add-download-window__field input:focus,
+.add-download-window__field select:focus {
   border-color: var(--accent-blue);
 }
 
-.floating-panel__row {
+.add-download-window__row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 16px;
 }
 
 /* 冲突展示面板 */
-.floating-panel__conflict {
-  background-color: rgba(255, 165, 0, 0.1);
-  border: 1px solid rgba(255, 165, 0, 0.3);
+.add-download-window__conflict {
+  background-color: rgba(255, 165, 0, 0.08);
+  border: 1px solid rgba(255, 165, 0, 0.25);
   border-radius: var(--radius-sm);
-  padding: 12px;
+  padding: 12px 16px;
   font-size: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.floating-panel__conflict p {
+.add-download-window__conflict p {
   margin: 0;
   color: #ffb74d;
 }
 
-.conflict-title {
+.add-download-window__conflict .conflict-title {
   color: var(--fg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.conflict-checkbox {
+.add-download-window__conflict .conflict-checkbox {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1025,30 +978,30 @@ button {
   cursor: pointer;
 }
 
-.conflict-ok {
+.add-download-window__conflict .conflict-ok {
   color: #81c784 !important;
 }
 
-.floating-panel__error {
+.add-download-window__error {
   color: #ff8a80;
   font-size: 12px;
-  background-color: rgba(255, 82, 82, 0.1);
-  border: 1px solid rgba(255, 82, 82, 0.2);
+  background-color: rgba(255, 82, 82, 0.08);
+  border: 1px solid rgba(255, 82, 82, 0.15);
   border-radius: var(--radius-sm);
   padding: 8px 12px;
 }
 
-/* 尾部操作区 */
-.floating-panel__footer {
+/* 尾部操作按钮区 */
+.add-download-window__footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: 10px;
+  padding: 14px 20px;
   background-color: #1a1a1a;
   border-top: 1px solid var(--border-light);
 }
 
-.floating-panel__footer .btn {
-  height: 32px;
+.add-download-window__footer .btn {
+  height: 34px;
   font-size: 13px;
 }

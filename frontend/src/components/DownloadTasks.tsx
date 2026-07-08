@@ -1,20 +1,17 @@
 /**
- * DownloadTasks — 下载任务列表（单行紧凑 UI 重构）
+ * DownloadTasks — 下载任务列表（内置单行 UI + 经典悬浮对话窗口挂载）
  *
  * 设计依据：docs/design/04-frontend-components.md §4.2 + 用户 2026-07-07 决策
  *
- * 核心变更：
- *  - 单行 UI：标题 / 链接 / 进度条 / 状态徽章 / 图标按钮组（一行展示）
- *  - 操作按钮 100% 替换为图标：
- *      - 🔄 重试（仅 failed 状态）
- *      - ❌ 取消（仅在进行中：downloading / merging / queued / pending）
- *      - 🗑 删除（仅在终态：ready / failed / cancelled）
- *  - 新增下载入口保留于页面顶部右侧（已确认）
+ * 功能：
+ *  - 任务信息单行显示：标题 / 链接 / 进度 / 状态 / 操作 (🔄 重试、❌ 取消、🗑 删除图标)
+ *  - 顶部常驻 [+ 新增下载] 按钮，用于激活真正浮动在页面最上层的独立交互窗口
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { useSSE } from '../hooks/useSSE';
 import type { DownloadTaskRead } from '../types';
+import AddDownloadDialog from './AddDownloadDialog';
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '等待中',
@@ -41,40 +38,32 @@ interface TaskRowProps {
 function TaskRow({ task, onCancel, onRetry, onDelete }: TaskRowProps) {
   const [live, setLive] = useState<DownloadTaskRead>(task);
 
-  // SSE 进度推送
   const onProgressPush = useCallback((updated: DownloadTaskRead) => {
     setLive(updated);
   }, []);
 
-  // 仅在任务处于进行中状态时，订阅 SSE
   const sseUrl =
     live.status === 'downloading' || live.status === 'merging' || live.status === 'queued'
       ? `/api/downloads/${task.id}/stream`
       : null;
   useSSE<DownloadTaskRead>(sseUrl || '', onProgressPush);
 
-  // 同步 props 变更（如父组件 reload 后）
   useEffect(() => {
     setLive(task);
   }, [task]);
 
-  // 显示进度条的条件：仅在下载/合并阶段
   const showProgress = live.status === 'downloading' || live.status === 'merging';
-  // 取消按钮：仅在进行中状态可见
   const showCancel =
     live.status === 'downloading' ||
     live.status === 'merging' ||
     live.status === 'queued' ||
     live.status === 'pending';
-  // 重试按钮：仅在失败/取消状态
   const showRetry = live.status === 'failed' || live.status === 'cancelled';
-  // 删除按钮：仅在已结束状态（避免误删进行中任务）
   const showDelete =
     live.status === 'ready' || live.status === 'failed' || live.status === 'cancelled';
 
   return (
     <li className={`download-row download-row--${live.status}`}>
-      {/* === 单行布局：title | link | progress | status | actions === */}
       <div className="download-row__title-cell">
         <span className="download-row__title" title={live.title || live.url}>
           {live.title || live.url}
@@ -167,6 +156,7 @@ export function DownloadTasks() {
   const { data, loading, error, reload } = useApi<DownloadTaskRead[]>(
     '/api/downloads',
   );
+  const [addOpen, setAddOpen] = useState(false);
 
   const handleCancel = async (id: number) => {
     try {
@@ -206,6 +196,13 @@ export function DownloadTasks() {
           <button type="button" className="btn btn--ghost" onClick={reload}>
             🔄 刷新
           </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => setAddOpen(true)}
+          >
+            <span>＋</span> 新增下载
+          </button>
         </div>
       </header>
 
@@ -219,7 +216,7 @@ export function DownloadTasks() {
         <div className="downloads__empty">
           <p className="downloads__empty-icon">📥</p>
           <h3>暂无下载任务</h3>
-          <p>点击右下角的「📥 快速下载」悬浮面板，即可开启您的第一个 YouTube 视频离线备灾。</p>
+          <p>点击右上角的「新增下载」开始您的第一个 YouTube 视频离线备灾。</p>
         </div>
       )}
 
@@ -236,6 +233,12 @@ export function DownloadTasks() {
           ))}
         </ul>
       )}
+
+      <AddDownloadDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onCreated={reload}
+      />
     </div>
   );
 }

@@ -4,7 +4,6 @@
  * 仿 YouTube 设计语言，提供极致沉浸观影体验。
  */
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { AddDownloadPanel } from './AddDownloadDialog';
 
 export function Layout() {
   const navigate = useNavigate();
@@ -69,9 +68,6 @@ export function Layout() {
           <Outlet />
         </main>
       </div>
-
-      {/* 全站右下角常驻：快速下载悬浮窗 (写邮件风格) */}
-      <AddDownloadPanel />
     </div>
   );
 }
