@@ -26,9 +26,6 @@
 | **设置** | GET | `/api/settings/cookies` | 获取 Cookie 状态 |
 | | POST | `/api/settings/cookies` | 上传 Cookie |
 | | DELETE | `/api/settings/cookies` | 清除 Cookie |
-| | GET | `/api/settings/proxy` | 获取代理配置 |
-| | PUT | `/api/settings/proxy` | 保存代理配置 |
-| | POST | `/api/settings/proxy/test` | 测试代理连通性 |
 | **运维** | GET | `/api/health` | 健康检查 |
 
 ## 2.2 Pydantic Schema 设计
@@ -136,31 +133,6 @@ class CookieStatus(BaseModel):
     updated_at: Optional[datetime] = None
     file_size: Optional[int] = None   # 字节
     note: str = "Cookie 内容不返回，仅返回元信息"
-
-
-class ProxyConfig(BaseModel):
-    enabled: bool
-    scheme: Literal["http", "https", "socks5"]
-    host: str
-    port: int = Field(ge=1, le=65535)
-    username: str = ""
-    password: str = ""
-
-
-class ProxyConfigPublic(BaseModel):
-    """对外返回时屏蔽 password 字段"""
-    enabled: bool
-    scheme: Literal["http", "https", "socks5"]
-    host: str
-    port: int
-    username: str = ""
-
-
-class ProxyTestResponse(BaseModel):
-    ok: bool
-    latency_ms: Optional[int] = None
-    status_code: Optional[int] = None
-    error: Optional[str] = None
 ```
 
 ## 2.3 路由签名（关键示例）

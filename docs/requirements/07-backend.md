@@ -181,76 +181,40 @@ CREATE TABLE system_settings (
   - 下载服务启动前，若 DB 中有 `ytdlp_cookies` 且本地无该文件，自动将内容写入本地 `data/cookies.txt`。
   - 调用 `yt_dlp.YoutubeDL` 时传入 `cookiefile="data/cookies.txt"` 参数。
 
-### 7.3.2 代理配置（已确认 ✅）
+### 7.3.2 全局代理配置（v2.0.0 重构 ✅）
 
-> 用户决策（2026-07-07）：yt-dlp 下载必须通过用户配置的代理（翻越 GFW / 解决本地 IP 被封）。
+> **架构变更（2026-07-08）**：彻底移除前端代理设置入口、后端 `ytdlp_proxy` 字段及所有代理 API。
+> 代理现在通过宿主机 `.env` 文件中**系统级环境变量** `HTTP_PROXY` / `HTTPS_PROXY` 统一管理。
+> 详细决策见 [00-architecture.md §ADR-04](../design/00-architecture.md)。
 
-#### 存储机制
+#### 配置位置
 
-代理配置以单条 JSON 形式存入 `system_settings` 表（key = `ytdlp_proxy`）。
+`backend/.env` 文件：
 
-```json
-{
-  "enabled": true,
-  "scheme": "http",          // http | https | socks5
-  "host": "127.0.0.1",
-  "port": 7890,
-  "username": "",            // 可选
-  "password": ""             // 可选
-}
+```bash
+# === 统一全局网络代理 (用于容器内自愈、Git、Pip 及视频下载) ===
+HTTP_PROXY=http://10.158.100.9:8080
+HTTPS_PROXY=http://10.158.100.9:8080
 ```
 
-**安全注意**：`username` 和 `password` 以明文存储，但**仅绑定内网访问**（见 [06-auth.md](06-auth.md)）。如未来需要公网访问，必须改用加密存储。
+#### 隐式捕获机制
 
-#### 接口列表
+在容器运行期间，所有网络客户端均**自动、隐式**读取环境变量中的代理：
 
-| Method | Path | 用途 |
-|--------|------|------|
-| GET | `/api/settings/proxy` | 获取代理配置（**返回时屏蔽 password**） |
-| PUT | `/api/settings/proxy` | 保存或更新代理配置 |
-| POST | `/api/settings/proxy/test` | 测试连通性：用代理访问 `https://www.youtube.com/`，返回成功/失败 + 耗时 + 出口 IP |
-| DELETE | `/api/settings/proxy` | 恢复为"禁用代理"（`{enabled: false}`） |
+| 客户端 | 用途 | 是否需手动传参 |
+|--------|------|----------------|
+| `yt-dlp` | 视频流下载 | ❌ 隐式捕获 |
+| `httpx` | 缩略图下载 | ❌ 隐式捕获 |
+| `git` | 容器启动拉取代码 | ✅ entrypoint.sh 显式注册 |
+| `pip` | 容器启动升级依赖 | ✅ entrypoint.sh 显式注册 |
 
-#### yt-dlp 调用参数
+> **应用层代码绝不应**在 `yt-dlp` 的 `ydl_opts` 或 `httpx.AsyncClient()` 中手动传 `proxy` 参数！这与 v2.0.0 之前的旧实现截然不同。
 
-服务在创建 `YoutubeDL` 实例时，从 DB 读取代理配置并拼装：
+#### 相关设计文档
 
-```python
-def _build_proxy_url(proxy_cfg: dict) -> str | None:
-    if not proxy_cfg.get("enabled"):
-        return None
-    scheme = proxy_cfg["scheme"]            # http / https / socks5
-    user = proxy_cfg.get("username", "")
-    pwd = proxy_cfg.get("password", "")
-    auth = f"{user}:{pwd}@" if user else ""
-    return f"{scheme}://{auth}{proxy_cfg['host']}:{proxy_cfg['port']}"
-
-ydl_opts = {
-    "proxy": _build_proxy_url(proxy_cfg),  # None 则不使用代理
-    "cookiefile": "data/cookies.txt" if cookies_exists else None,
-    # ... 其他选项
-}
-```
-
-> yt-dlp 的 `proxy` 参数会传递给内部所有 HTTP/HTTPS 请求（视频分段下载、缩略图、字幕、格式解析）。
-
-#### 测试连通性实现
-
-```python
-import httpx, time
-
-async def test_proxy(proxy_cfg: dict) -> dict:
-    proxy_url = _build_proxy_url(proxy_cfg)
-    start = time.time()
-    try:
-        async with httpx.AsyncClient(proxy=proxy_url, timeout=10.0) as client:
-            r = await client.get("https://www.youtube.com/")
-            latency_ms = int((time.time() - start) * 1000)
-            return {"ok": r.status_code == 200, "latency_ms": latency_ms,
-                    "status_code": r.status_code}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-```
+- [00-architecture.md §ADR-04](../design/00-architecture.md) — 重构决策
+- [05-settings-and-config.md](../design/05-settings-and-config.md) — 设置服务与全局代理
+- [07-operations.md](../design/07-operations.md) — 容器自愈启动脚本细节
 
 ---
 

@@ -1,54 +1,41 @@
 # 05. 设置与系统配置设计
 
-> 数据库表：`system_settings`。对应页面：`<Settings />`。
+> 数据库表：`system_settings` 仅用于存储 Cookies 原始文本。代理现已由 .env 环境变量接管（详见 ADR-04）。
+
+## Revision History
+
+| 版本号 | 日期 | 变更说明 | 作者 |
+| :--- | :--- | :--- | :--- |
+| v1.0.0 | 2026-07-07 | 初始版本：支持 Cookies 与代理配置 | Gemini CLI |
+| v2.0.0 | 2026-07-08 | **架构重构**：移除 `ytdlp_proxy` 字段及所有代理接口。代理统一切到宿主机 `.env` 环境变量 | Gemini CLI |
+
+---
 
 ## 5.1 数据模型
 
-`system_settings` 表用于存放系统全局 KV。
+`system_settings` 表仅用于存放 Cookies 文本。
 
 | key | 类型 | value 格式 | 含义 |
 |-----|------|------------|------|
 | `ytdlp_cookies` | Text | Netscape cookie 纯文本 | 用于突破 YouTube 年龄限制的 Cookie 原始文本 |
-| `ytdlp_proxy` | Text | JSON (ProxyConfig) | 下载代理配置（含开关、协议、地址、端口、用户名、密码） |
+
+> ❌ **已废弃字段**：`ytdlp_proxy`（JSON ProxyConfig）。在 v2.0.0 重构中彻底从数据库中移除。
+> 现在的代理配置统一在 `backend/.env` 中以 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量形式管理，详见 [00-architecture.md §ADR-04](00-architecture.md)。
 
 ## 5.2 核心服务设计
 
 > 文件位置：`backend/app/services/settings.py`
 
 ```python
-import json
 import os
 from datetime import datetime
-from sqlalchemy import select
-from ..database import AsyncSessionLocal
-from ..models import SystemSetting
+from app.database import AsyncSessionLocal
+from app.models import SystemSetting
 
 COOKIES_FILE_PATH = "data/cookies.txt"
 
 
 class SettingsService:
-    @staticmethod
-    async def get_proxy() -> dict:
-        """获取代理配置，若不存在返回默认禁用配置"""
-        async with AsyncSessionLocal() as db:
-            setting = await db.get(SystemSetting, "ytdlp_proxy")
-            if not setting:
-                return {"enabled": False, "scheme": "http", "host": "", "port": 7890}
-            return json.loads(setting.value)
-
-    @staticmethod
-    async def set_proxy(proxy_cfg: dict) -> None:
-        """保存代理配置"""
-        async with AsyncSessionLocal() as db:
-            setting = await db.get(SystemSetting, "ytdlp_proxy")
-            val = json.dumps(proxy_cfg)
-            if not setting:
-                db.add(SystemSetting(key="ytdlp_proxy", value=val))
-            else:
-                setting.value = val
-                setting.updated_at = datetime.utcnow()
-            await db.commit()
-
     @staticmethod
     async def get_cookies_status() -> dict:
         """获取 Cookie 文件状态"""
@@ -91,75 +78,71 @@ class SettingsService:
                 await db.commit()
 ```
 
-## 5.3 代理 URL 拼装
+## 5.3 全局代理配置（隐式捕获于 .env 环境变量）
 
-在 `backend/app/services/downloader.py` 中拼装代理：
+### 5.3.1 配置位置
 
-```python
-def get_ytdlp_proxy_url(proxy_cfg: dict) -> str | None:
-    if not proxy_cfg.get("enabled"):
-        return None
-    scheme = proxy_cfg["scheme"]
-    host = proxy_cfg["host"]
-    port = proxy_cfg["port"]
-    user = proxy_cfg.get("username", "")
-    pwd = proxy_cfg.get("password", "")
+`backend/.env` 文件中通过标准环境变量配置：
 
-    if user:
-        return f"{scheme}://{user}:{pwd}@{host}:{port}"
-    return f"{scheme}://{host}:{port}"
+```bash
+# === 统一全局网络代理 (用于容器内自愈、Git、Pip 及视频下载) ===
+# 填入宿主机可达的代理地址 (留空则直连)
+HTTP_PROXY=http://10.158.100.9:8080
+HTTPS_PROXY=http://10.158.100.9:8080
 ```
 
-## 5.4 代理连通性测试服务
+### 5.3.2 隐式捕获机制
 
-```python
-import httpx
-import time
+`yt-dlp` 与 `httpx` 在发起网络请求时会**自动、隐式**读取系统环境变量中的 `HTTP_PROXY` / `HTTPS_PROXY`：
 
-async def test_proxy_connection(proxy_cfg: dict) -> dict:
-    proxy_url = get_ytdlp_proxy_url(proxy_cfg)
-    start = time.time()
-    try:
-        # 使用 httpx 通过配置的代理访问 YouTube
-        async with httpx.AsyncClient(proxy=proxy_url, timeout=10.0) as client:
-            r = await client.get("https://www.youtube.com/", follow_redirects=True)
-            latency = int((time.time() - start) * 1000)
-            return {
-                "ok": r.status_code == 200,
-                "latency_ms": latency,
-                "status_code": r.status_code,
-            }
-    except Exception as e:
-        return {
-            "ok": False,
-            "error": f"连接失败: {str(e)}"
-        }
-```
+- ✅ `yt-dlp` 下载视频流：自动走代理
+- ✅ `httpx` 拉取缩略图：自动走代理
+- ✅ `git` 在容器启动时拉取代码：自动走代理
+- ✅ `pip` 在容器启动时升级依赖：自动走代理
 
-## 5.5 数据流：更新代理配置
+**应用层不需要也不应该在代码中手动注入 `proxy` 参数**！
+
+### 5.3.3 Dockerfile 与 entrypoint.sh 配合
+
+详见 [07-operations.md](07-operations.md)。
+
+- `Dockerfile` 构建时使用 `network: host` + `http_proxy` 参数（仅用于前端 npm 与后端 apt 换源）
+- `entrypoint.sh` 启动时读取 `.env` 环境变量并自动配置 Git 全局代理
+
+## 5.4 数据流：保存 Cookies
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User as 用户
     participant FE as React 设置页
-    participant BE as FastAPI Settings API
+    participant BE as FastAPI Cookies API
     participant DB as SQLite DB
+    participant FS as 文件系统
 
-    User->>FE: 填写代理信息 (HTTP, 127.0.0.1:7890)
-    FE->>BE: POST /api/settings/proxy/test {代理配置}
-    BE-->>FE: 返回 ok=true, latency_ms=120ms
-    FE->>User: 按钮变绿，显示延迟良好
-    User->>FE: 点击 "保存配置"
-    FE->>BE: PUT /api/settings/proxy {代理配置}
-    BE->>DB: UPDATE system_settings (ytdlp_proxy)
+    User->>FE: 粘贴 Cookie 文本
+    FE->>BE: POST /api/settings/cookies (raw text)
+    BE->>FS: 写入 data/cookies.txt
+    BE->>DB: UPSERT system_settings.ytdlp_cookies
     BE-->>FE: 返回 200 OK
-    FE->>User: 弹出 Toast "代理配置已更新"
+    FE->>User: 弹出 Toast "✅ Cookie 已上传"
 ```
+
+## 5.5 前端设置页 (极简版)
+
+> 文件位置：`frontend/src/components/Settings.tsx`
+
+经过 v2.0.0 重构后，前端设置页**只保留 Cookies 管理**：
+- Cookie 状态展示
+- Cookie 上传（多行 textarea）
+- Cookie 清除
+- 极简说明：告知用户全局代理现在通过 `.env` 统一配置
 
 ---
 
 ## Related
 
+- [00-architecture.md](00-architecture.md) — 整体架构与 ADR-04 决策记录
 - [01-database-schema.md](01-database-schema.md) — 数据库 Schema
 - [03-yt-dlp-integration.md](03-yt-dlp-integration.md) — yt-dlp 调度与参数传入
+- [07-operations.md](07-operations.md) — 容器自愈启动与 .env 配置

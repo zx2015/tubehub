@@ -2,6 +2,13 @@
 
 > 来源：用户需求 §9（本地 venv 运行）、§10（Docker 部署）
 
+## Revision History
+
+| 版本号 | 日期 | 变更说明 | 作者 |
+| :--- | :--- | :--- | :--- |
+| v1.0.0 | 2026-07-07 | 初始版本 | Gemini CLI |
+| v2.0.0 | 2026-07-08 | **架构性升级**：(1) 引入 `entrypoint.sh` 自愈启动（git pull + pip upgrade on boot）；(2) `.env` 统一全局代理 `HTTP_PROXY`（替代前端/后端代理设置） | Gemini CLI |
+
 ## 8.1 本地开发模式（venv）
 
 ### 8.1.1 环境信息
@@ -105,11 +112,13 @@ RUN mkdir -p /app/data/videos /app/data/thumbnails /app/logs
 EXPOSE 8000
 
 # 健康检查
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-# 启动
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# 自愈启动入口（v2.0.0 增强）
+COPY backend/app/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
 ```
 
 ### 8.2.2 docker-compose.yml
@@ -119,39 +128,49 @@ version: "3.9"
 
 services:
   tubehub:
-    build: .
+    build:
+      context: .
+      network: host
+      args:
+        - http_proxy=${HTTP_PROXY}
+        - https_proxy=${HTTPS_PROXY}
     container_name: tubehub
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      # 持久化数据
-      - ./data:/app/data
-      # 持久化日志
-      - ./logs:/app/logs
+      # 1. 挂载整个项目目录（含 .git）以支持自升级
+      - /home/tubehub/repo:/app
+      - /home/tubehub/repo/data:/app/data
+      - /home/tubehub/repo/logs:/app/logs
+      - /home/tubehub/repo/frontend/dist:/app/static:ro
+      # 2. 自愈启动脚本
+      - /home/tubehub/repo/backend/app/entrypoint.sh:/entrypoint.sh:ro
     environment:
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
-      - SESSION_SECRET_KEY=${SESSION_SECRET_KEY:?SESSION_SECRET_KEY is required}
+      - SECRET_KEY=${SECRET_KEY:?required}
       - DATABASE_URL=sqlite+aiosqlite:///./data/tubehub.db
-      - DATA_DIR=/app/data
-      - VIDEOS_DIR=/app/data/videos
-      - THUMBNAILS_DIR=/app/data/thumbnails
-      - LOGS_DIR=/app/logs
-      - MAX_CONCURRENT_DOWNLOADS=2
-      - DEFAULT_USERNAME=admin
+      # 3. 统一全局网络代理（Git/Pip/yt-dlp/httpx 均会自动捕获）
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+      - NO_PROXY=localhost,127.0.0.1
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 45s
 ```
 
 ### 8.2.3 .env（Docker 用）
 
 ```bash
+# 必须：用于会话加密
 SECRET_KEY=<openssl rand -hex 32>
 SESSION_SECRET_KEY=<openssl rand -hex 32>
+
+# 必须：统一全局网络代理（容器内 Git / Pip / yt-dlp / httpx 均自动捕获）
+HTTP_PROXY=http://10.158.100.9:8080
+HTTPS_PROXY=http://10.158.100.9:8080
 ```
 
 ### 8.2.4 启动命令

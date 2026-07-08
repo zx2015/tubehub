@@ -75,7 +75,7 @@ async def download_thumbnail(video_id: str, proxy_url: str | None = None) -> str
 
 ### 3.1.4 注意事项
 
-- **代理同步**：缩略图下载必须读取与 yt-dlp 相同的 `system_settings.ytdlp_proxy`，避免漏配
+- **代理自动捕获**（v2.0.0）：缩略图下载通过 `httpx.AsyncClient()` **隐式**读取系统环境变量 `HTTP_PROXY`，无需任何手动配置，与 yt-dlp 行为一致
 - **文件大小校验**：YouTube 返回的占位 `default.jpg` 通常 < 1KB，需过滤避免保存无效图
 - **并发控制**：批量入库时（如歌单），缩略图下载应有信号量限流，避免对 YouTube 造成压力
 - **缩略图不再依赖 yt-dlp**：关闭 `writethumbnail` 选项（节省带宽，统一从后端下载）

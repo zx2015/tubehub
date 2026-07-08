@@ -138,7 +138,7 @@ class PlayHistory(Base):
 
 
 class SystemSetting(Base):
-    """通用 KV 存储：cookies、proxy 等运行时可配置项"""
+    """通用 KV 存储：仅用于存储 cookies 原始文本（代理现已由 .env 环境变量接管，不存 DB）"""
     __tablename__ = "system_settings"
 
     key = Column(String(64), primary_key=True)
