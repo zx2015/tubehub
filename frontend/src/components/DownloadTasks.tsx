@@ -80,6 +80,11 @@ function TaskRow({ task, onCancel, onRetry, onDelete }: TaskRowProps) {
         >
           🔗 原始链接
         </a>
+        {live.video_format_id && live.audio_format_id && (
+          <span className="download-row__format-badge">
+            V:{live.video_format_id} / A:{live.audio_format_id}
+          </span>
+        )}
       </div>
 
       <div className="download-row__progress-cell">

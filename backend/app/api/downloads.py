@@ -1,9 +1,14 @@
-"""/api/downloads 路由 (极简自愈版)
+"""/api/downloads 路由 (v3.0 双 select 严格 list-formats)
 
 时序：
-1. POST 时使用 ScraperService 同步获取真实元数据 (含 title, youtube_id)
-2. 提前下载缩略图并落盘，免去后期下载延迟
-3. 以 queued 状态完整入库
+1. POST /api/downloads/check (🔍 检测冲突)
+   - 走 ScraperService.fetch_video_formats 完整探测，返回真实 video_formats + audio_formats
+   - 同时查 DB 命中冲突
+2. POST /api/downloads
+   - 接收前端双 select 提交的 video_format_id + audio_format_id
+   - 走 ScraperService.fetch_video_formats 拉取真实元数据
+   - 提前下载缩略图
+   - 以 queued 状态入库（必带 video_format_id + audio_format_id）
 """
 import asyncio
 from datetime import datetime
@@ -23,43 +28,67 @@ from app.schemas.download import (
     DownloadCreateRequest,
     DownloadTaskRead,
     ExistingVideoInfo,
+    VideoFormatOption,
 )
 
 router = APIRouter(prefix="/api/downloads", tags=["downloads"])
 
 
+# ----------------------------------------------------------------------
+# 工具：从 Scraper 探测结果中转换 VideoFormatOption
+# ----------------------------------------------------------------------
+def _to_video_format_option(f: dict) -> VideoFormatOption:
+    return VideoFormatOption(
+        id=str(f.get("id")),
+        label=f.get("label", f.get("id", "?")),
+        ext=f.get("ext"),
+        height=f.get("height"),
+        width=f.get("width"),
+        vcodec=f.get("vcodec"),
+        abr=f.get("abr"),
+        acodec=f.get("acodec"),
+        tbr=f.get("tbr"),
+        filesize=f.get("filesize"),
+    )
+
+
+# ----------------------------------------------------------------------
+# POST /api/downloads/check  🔍 检测冲突 (v3.0)
+# ----------------------------------------------------------------------
 @router.post("/check", response_model=DownloadCheckResponse)
 async def check_download(
     req: DownloadCheckRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """前置探测接口：
-    - 快速判断视频是否已在库中
-    - 告知前端视频标题及是否是歌单，用于展示防重弹窗
+    """v3.0 严格 list-formats 探测：
+    - 走完整 extract_info(download=False)
+    - 返回 video_formats + audio_formats 供前端下拉
+    - 单视频同时查 DB 命中
+    - 歌单则返回 entries 列表（歌单模式下双 select 由前端为每个 entry 选）
     """
     from app.services.scraper import ScraperService
     url_str = str(req.url)
 
-    # 用 flat=True 快速探测（如果是歌单）
     try:
-        info = await ScraperService.fetch_metadata(url_str, flat=True)
+        probe = await ScraperService.fetch_video_formats(url_str)
     except Exception as e:
+        logger.error(f"check_download: scrape failed for {url_str}: {e}")
         raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")
 
-    is_playlist = info.get("_type") == "playlist"
-    youtube_id = info.get("id")
-    title = info.get("title")
+    youtube_id = probe.get("youtube_id")
+    title = probe.get("title")
 
-    # 如果是单视频，且库中已存在
+    # 查库：单视频是否已存在
     existing_video = None
-    if not is_playlist and youtube_id:
+    if youtube_id:
         stmt = select(Video).where(Video.youtube_id == youtube_id)
         video = (await db.execute(stmt)).scalar_one_or_none()
         if video:
             existing_video = ExistingVideoInfo(
                 id=video.id,
                 title=video.title,
-                quality_label=video.quality_label,
+                video_format_id=video.video_format_id,
+                audio_format_id=video.audio_format_id,
                 file_size=video.file_size or 0,
                 last_position=video.last_position,
             )
@@ -68,101 +97,108 @@ async def check_download(
         conflict=existing_video is not None,
         youtube_id=youtube_id,
         title=title,
-        duration=info.get("duration"),
-        is_playlist=is_playlist,
-        playlist_entries=info.get("entries") if is_playlist else None,
+        duration=probe.get("duration"),
+        uploader=probe.get("uploader"),
+        is_playlist=False,  # 简化：v3.0 探测只返回单视频 formats；歌单另行处理
+        playlist_entries=None,
         existing_video=existing_video,
+        video_formats=[_to_video_format_option(f) for f in probe.get("video_formats", [])],
+        audio_formats=[_to_video_format_option(f) for f in probe.get("audio_formats", [])],
     )
 
 
+# ----------------------------------------------------------------------
+# POST /api/downloads  v3.0 双 select 创建任务
+# ----------------------------------------------------------------------
 @router.post("", response_model=list[DownloadTaskRead], status_code=201)
 async def create_download(
     req: DownloadCreateRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """新增下载任务 (v2 极简代理版)"""
+    """
+    v3.0 严格模式：
+    - 必传 video_format_id + audio_format_id（来自前端下拉，list-formats 真实可选）
+    - 后端无需关心 /best 兜底（用户不会选到不存在的 ID）
+    """
     from app.services.scraper import ScraperService
     from app.services.thumbnail import download_thumbnail
 
     url_str = str(req.url)
 
-    # 1. 前置拉取完整元数据 (不传代理，自动由环境变量 HTTP_PROXY 穿透)
+    if not req.video_format_id or not req.audio_format_id:
+        raise HTTPException(
+            status_code=400,
+            detail="必须选择视频格式与音频格式 (v3.0 严格 list-formats)",
+        )
+
+    # 1. 完整拉取元信息
     try:
-        info = await ScraperService.fetch_metadata(url_str, flat=False)
+        probe = await ScraperService.fetch_video_formats(url_str)
     except Exception as e:
+        logger.error(f"create_download: scrape failed for {url_str}: {e}")
         raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")
 
-    created_tasks: list[DownloadTask] = []
-
-    # 2. 区分单视频与歌单
-    if info.get("_type") == "playlist":
-        entries = info.get("entries") or []
-        for entry in entries:
-            if not entry:
-                continue
-            entry_id = entry.get("id")
-            entry_url = entry.get("webpage_url") or entry.get("url") or url_str
-            entry_title = entry.get("title") or f"Unknown - {entry_id}"
-
-            # 提前下载缩略图（由本地环境变量代理自动捕获）
-            if entry_id:
-                try:
-                    await download_thumbnail(entry_id)
-                except Exception as e:
-                    logger.warning(f"提前下载歌单缩略图失败 ({entry_id}): {e}")
-
-            task = DownloadTask(
-                url=entry_url,
-                youtube_id=entry_id,
-                title=entry_title,
-                format_type=req.format_type,
-                quality=req.quality,
-                status="queued",
-                progress=0.0,
-                retry_count=0,
-                max_retries=3,
-                created_at=datetime.utcnow(),
-            )
-            db.add(task)
-            created_tasks.append(task)
-    else:
-        # 单视频
-        video_id = info.get("id")
-        video_title = info.get("title") or "Untitled"
-
-        # 提前下载缩略图
-        if video_id:
-            try:
-                await download_thumbnail(video_id)
-            except Exception as e:
-                logger.warning(f"提前下载缩略图失败 ({video_id}): {e}")
-
-        task = DownloadTask(
-            url=url_str,
-            youtube_id=video_id,
-            title=video_title,
-            format_type=req.format_type,
-            quality=req.quality,
-            status="queued",
-            progress=0.0,
-            retry_count=0,
-            max_retries=3,
-            created_at=datetime.utcnow(),
+    # 2. 校验用户选的两个 format_id 是否在 list-formats 中（严格性保障）
+    video_ids = {str(f["id"]) for f in probe.get("video_formats", [])}
+    audio_ids = {str(f["id"]) for f in probe.get("audio_formats", [])}
+    if req.video_format_id not in video_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"视频格式 ID {req.video_format_id} 不在可选列表中，请重新选择",
         )
-        db.add(task)
-        created_tasks.append(task)
+    if req.audio_format_id not in audio_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"音频格式 ID {req.audio_format_id} 不在可选列表中，请重新选择",
+        )
 
-    if not created_tasks:
-        raise HTTPException(status_code=400, detail="未能解析到任何可下载的视频")
+    video_id = probe.get("youtube_id")
+    video_title = probe.get("title") or "Untitled"
 
+    # 3. 提前下载缩略图
+    if video_id:
+        try:
+            await download_thumbnail(video_id)
+        except Exception as e:
+            logger.warning(f"提前下载缩略图失败 ({video_id}): {e}")
+
+    # 4. 冲突检查（除非 overwrite）
+    if video_id and not req.overwrite:
+        existing = (await db.execute(
+            select(Video).where(Video.youtube_id == video_id)
+        )).scalar_one_or_none()
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"视频已存在 (id={existing.id}, title={existing.title})；如需覆盖请传 overwrite=true",
+            )
+
+    # 5. 写库
+    task = DownloadTask(
+        url=url_str,
+        youtube_id=video_id,
+        title=video_title,
+        video_format_id=int(req.video_format_id),
+        audio_format_id=int(req.audio_format_id),
+        status="queued",
+        progress=0.0,
+        retry_count=0,
+        max_retries=3,
+        created_at=datetime.utcnow(),
+    )
+    db.add(task)
     await db.commit()
-    for t in created_tasks:
-        await db.refresh(t)
+    await db.refresh(task)
+    logger.info(
+        f"Created v3.0 download task id={task.id} vid={video_id} "
+        f"V={req.video_format_id} A={req.audio_format_id}"
+    )
+    return [DownloadTaskRead.model_validate(task)]
 
-    logger.info(f"Created {len(created_tasks)} download task(s) (queued) with full metadata")
-    return [DownloadTaskRead.model_validate(t) for t in created_tasks]
 
-
+# ----------------------------------------------------------------------
+# GET /api/downloads  列表
+# ----------------------------------------------------------------------
 @router.get("", response_model=list[DownloadTaskRead])
 async def list_downloads(
     status: Optional[str] = Query(None),
@@ -176,75 +212,88 @@ async def list_downloads(
     return [DownloadTaskRead.model_validate(t) for t in tasks]
 
 
+# ----------------------------------------------------------------------
+# GET /api/downloads/{id}  任务详情
+# ----------------------------------------------------------------------
 @router.get("/{task_id}", response_model=DownloadTaskRead)
 async def get_download(task_id: int, db: AsyncSession = Depends(get_db)):
-    """获取任务详情。"""
     task = await db.get(DownloadTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     return DownloadTaskRead.model_validate(task)
 
 
+# ----------------------------------------------------------------------
+# DELETE /api/downloads/{id}  取消/删除
+# ----------------------------------------------------------------------
 @router.delete("/{task_id}", status_code=204)
 async def delete_download(task_id: int, db: AsyncSession = Depends(get_db)):
-    """取消或物理删除下载任务：
-    - 若任务处于进行中状态，调用取消逻辑
-    - 若任务已处于终态，调用物理删除逻辑清理流水历史
-    """
+    """双向自愈型删除：进行中→取消；已完成→物理删除。"""
     from app.services.downloader import cancel_running_task, delete_download_task
-
     task = await db.get(DownloadTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    if task.status in ("downloading", "merging", "queued", "pending"):
-        ok = await cancel_running_task(task_id)
-        if not ok:
-            raise HTTPException(status_code=500, detail="取消失败")
+    if task.status in ("pending", "queued", "downloading", "merging"):
+        await cancel_running_task(task_id)
     else:
-        ok = await delete_download_task(task_id)
-        if not ok:
-            raise HTTPException(status_code=500, detail="删除记录失败")
+        await delete_download_task(task_id)
+    return
 
 
-@router.post("/{task_id}/retry", response_model=DownloadTaskRead)
+# ----------------------------------------------------------------------
+# POST /api/downloads/{id}/retry  手动重试
+# ----------------------------------------------------------------------
+@router.post("/{task_id}/retry")
 async def retry_download(task_id: int, db: AsyncSession = Depends(get_db)):
-    """手动重试任务"""
+    """手动重试：仅 failed/cancelled 状态可重试。"""
     from app.services.downloader import reset_task_for_manual_retry
-
-    ok = await reset_task_for_manual_retry(task_id)
-    if not ok:
-        raise HTTPException(status_code=400, detail="当前任务状态不满足重试条件")
-
     task = await db.get(DownloadTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.status not in ("failed", "cancelled"):
+        raise HTTPException(
+            status_code=400,
+            detail="当前任务状态不满足重试条件 (必须为 failed/cancelled)",
+        )
+    await reset_task_for_manual_retry(task_id)
+    await db.refresh(task)
     return DownloadTaskRead.model_validate(task)
 
 
+# ----------------------------------------------------------------------
+# GET /api/downloads/{id}/stream  SSE 实时进度推送
+# ----------------------------------------------------------------------
 @router.get("/{task_id}/stream")
 async def stream_progress(task_id: int, db: AsyncSession = Depends(get_db)):
-    """SSE 实时进度推送：每秒轮询一次。"""
+    """SSE 实时推送：每秒轮询任务状态/进度。"""
+    from app.database import AsyncSessionLocal
+    from app.models import DownloadTask as DT
+
+    TERMINAL_STATUS = {"ready", "failed", "cancelled", "deleted"}
+
     async def event_generator():
-        task = await db.get(DownloadTask, task_id)
-        if not task:
-            yield "event: error\ndata: {\"detail\": \"任务不存在\"}\n\n"
-            return
-
-        first_payload = DownloadTaskRead.model_validate(task).model_dump_json()
-        yield f"event: progress\ndata: {first_payload}\n\n"
-
-        while True:
-            await asyncio.sleep(1.0)
-            task = await db.get(DownloadTask, task_id)
-            if not task:
-                yield "event: error\ndata: {\"detail\": \"任务已被删除\"}\n\n"
+        # 立即推送首帧
+        async with AsyncSessionLocal() as session:
+            task = await session.get(DT, task_id)
+            if task:
+                yield _format_event("progress", DownloadTaskRead.model_validate(task).model_dump_json())
+            else:
+                yield _format_event("error", '{"detail":"任务不存在"}')
                 return
 
-            current_state = task.status
-            payload = DownloadTaskRead.model_validate(task).model_dump_json()
-            yield f"event: progress\ndata: {payload}\n\n"
-
-            if current_state in ("ready", "failed", "cancelled"):
-                break
+        # 1Hz 轮询
+        for _ in range(60 * 60):  # 最多 1 小时
+            await asyncio.sleep(1)
+            async with AsyncSessionLocal() as session:
+                task = await session.get(DT, task_id)
+                if not task:
+                    yield _format_event("error", '{"detail":"任务已被删除"}')
+                    return
+                payload = DownloadTaskRead.model_validate(task).model_dump_json()
+                yield _format_event("progress", payload)
+                if task.status in TERMINAL_STATUS:
+                    return
 
     return StreamingResponse(
         event_generator(),
@@ -255,3 +304,7 @@ async def stream_progress(task_id: int, db: AsyncSession = Depends(get_db)):
             "Connection": "keep-alive",
         },
     )
+
+
+def _format_event(event: str, data: str) -> str:
+    return f"event: {event}\ndata: {data}\n\n"

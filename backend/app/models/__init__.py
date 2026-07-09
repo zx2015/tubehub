@@ -32,8 +32,9 @@ class Video(Base):
     vcodec = Column(String(32))
     acodec = Column(String(32))
     container = Column(String(16))
-    format_type = Column(String(16), default="video")
-    quality_label = Column(String(32))
+    # v3.0 双 format_id（严格 list-formats，可为 None 兼容历史任务）
+    video_format_id = Column(Integer, nullable=True)
+    audio_format_id = Column(Integer, nullable=True)
 
     last_position = Column(Float, default=0)
     last_watched_at = Column(DateTime)
@@ -59,8 +60,9 @@ class DownloadTask(Base):
     url = Column(Text, nullable=False)
     youtube_id = Column(String(16), index=True)
     title = Column(String(512))
-    format_type = Column(String(16), nullable=False)
-    quality = Column(String(16), nullable=False)
+    # v3.0 双 format_id 必填（由前端 select 提交）
+    video_format_id = Column(Integer, nullable=False)
+    audio_format_id = Column(Integer, nullable=False)
 
     status = Column(String(16), nullable=False, default="pending", index=True)
     progress = Column(Float, default=0)
@@ -110,7 +112,7 @@ class PlayHistory(Base):
 
 
 class SystemSetting(Base):
-    """通用 KV 存储：cookies、proxy 等运行时可配置项"""
+    """通用 KV 存储：仅用于存储 cookies 原文（v2.0 重构：代理已上移到 .env）"""
     __tablename__ = "system_settings"
 
     key = Column(String(64), primary_key=True)

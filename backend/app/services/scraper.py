@@ -1,61 +1,158 @@
 """
-scraper.py — 核心元数据提取服务。
+scraper.py — v3.0 双 select 严格模式
 
-职责：
-- 在任务入库（POST /api/downloads）前，使用 yt-dlp 快速抓取视频/歌单格式、Title、Thumbnail URL 
-- 自适应处理单视频与 Playlists (扁平抓取)
-- 自动集成 SettingsService 中的 cookies 绕过安全限制，全局代理由系统环境变量隐式捕获
+使用 yt-dlp 完整 extract_info 拉取真实 formats 列表。
 """
 import asyncio
-from loguru import logger
-from app.services.settings import SettingsService
-from app.services.downloader import _import_yt_dlp
+import logging
+from typing import Any
+
+import yt_dlp
+
+logger = logging.getLogger(__name__)
+
+
+def _build_ydl_opts(download: bool = False) -> dict:
+    """构造 yt-dlp 探测选项：不下载、读取真实全部 formats。"""
+    return {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,  # 严格只探测不下载
+        # 绕过 YouTube PO-Token 校验
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["tv", "android", "web"],
+            }
+        },
+    }
+
+
+async def _run_in_executor(sync_fn) -> Any:
+    """在默认线程池中执行同步阻塞的 yt-dlp 调用，避免阻塞事件循环。"""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, sync_fn)
+
+
+def _extract(url: str) -> dict:
+    """同步阻塞调用 yt-dlp extract_info。"""
+    with yt_dlp.YoutubeDL(_build_ydl_opts(download=False)) as ydl:
+        return ydl.extract_info(url, download=False)
+
+
+def _filter_video_formats(formats: list[dict]) -> list[dict]:
+    """筛选出所有视频轨（vcodec != none）。"""
+    return [f for f in formats if f.get("vcodec") and f.get("vcodec") != "none"]
+
+
+def _filter_audio_formats(formats: list[dict]) -> list[dict]:
+    """筛选出所有音频轨（acodec != none）。"""
+    return [f for f in formats if f.get("acodec") and f.get("acodec") != "none"]
+
+
+def _format_label(f: dict) -> str:
+    """生成人类可读的格式描述。"""
+    parts = []
+    if f.get("height"):
+        parts.append(f"{f['height']}p")
+    if f.get("vcodec") and f["vcodec"] != "none":
+        parts.append(f["vcodec"].split(".")[0])
+    if f.get("fps") and f["fps"] >= 50:
+        parts.append(f"{int(f['fps'])}fps")
+    if f.get("tbr"):
+        parts.append(f"~{int(f['tbr'])}kbps")
+    if f.get("filesize") or f.get("filesize_approx"):
+        size = f.get("filesize") or f.get("filesize_approx")
+        if size > 1024 * 1024:
+            parts.append(f"{size // (1024*1024)}MB")
+        elif size:
+            parts.append(f"{size // 1024}KB")
+    if f.get("ext"):
+        parts.append(f.get("ext"))
+    if f.get("format_note"):
+        note = f["format_note"]
+        if note and note not in parts:
+            parts.append(note)
+    return " · ".join(str(p) for p in parts) if parts else f.get("format", "?")
 
 
 class ScraperService:
+    """对外提供视频元信息与 formats 探测服务。"""
+
     @staticmethod
-    async def fetch_metadata(url: str, flat: bool = False) -> dict:
-        """
-        同步调用 yt-dlp 提取视频或歌单元数据（不下载）。
-        使用 run_in_executor 转移到线程池中运行以防卡死 API 进程。
-
-        参数:
-            url: 视频/歌单 URL
-            flat: 若 True，使用 extract_flat 模式秒级提取（适用于歌单）。若 False，提取完整元数据。
-        """
-        loop = asyncio.get_running_loop()
-
-        # 1. 仅动态获取 cookies 配置（代理自动由系统环境变量 HTTP_PROXY 捕获，无需手动传入 ydl_opts）
-        cookies_status = await SettingsService.get_cookies_status()
-        cookies_path = "data/cookies.txt" if cookies_status.get("has_cookie", False) else None
-
-        # 2. 构造 yt-dlp 提取参数
-        ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": False,
-            "cookiefile": cookies_path,
-
-            # 绕过 PO-Token 安全限制
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["tv", "android", "web"],
-                }
-            },
-        }
-        if flat:
-            ydl_opts["extract_flat"] = "in_playlist"  # 歌单快速模式
-
-        yt_dlp = _import_yt_dlp()
-
-        def _sync_extract():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                return ydl.extract_info(url, download=False)
-
+    async def fetch_metadata(url: str) -> dict:
+        """完整拉取元信息（与 fetch_formats 共享底层，但保留向后兼容）。"""
         try:
-            logger.info(f"Scraper: fetching metadata for {url} (env HTTP_PROXY auto-active)")
-            info = await loop.run_in_executor(None, _sync_extract)
-            return info
+            logger.info(f"Scraper: fetching metadata for {url}")
+            return await _run_in_executor(lambda: _extract(url))
         except Exception as e:
-            logger.error(f"Scraper error for {url}: {e}")
+            logger.error(f"Scraper: failed for {url}: {e}")
             raise RuntimeError(f"解析视频信息失败: {e}")
+
+    @staticmethod
+    async def fetch_video_formats(url: str) -> dict:
+        """
+        v3.0 探测：返回 {title, youtube_id, duration, video_formats[], audio_formats[]}
+        每个 format 项含：{id, label, ext, height/abr, vcodec/acodec, filesize, tbr}
+        """
+        try:
+            logger.info(f"Scraper: v3.0 fetch_video_formats for {url}")
+            info = await _run_in_executor(lambda: _extract(url))
+        except Exception as e:
+            logger.error(f"Scraper: failed for {url}: {e}")
+            raise RuntimeError(f"解析视频信息失败: {e}")
+
+        # 歌单：取首条 entry
+        if info.get("_type") == "playlist":
+            entries = info.get("entries") or []
+            if not entries:
+                raise RuntimeError("歌单为空或无法访问")
+            info = entries[0]
+
+        formats = info.get("formats", []) or []
+        video_raw = _filter_video_formats(formats)
+        audio_raw = _filter_audio_formats(formats)
+
+        # 构造选项列表
+        video_options = [
+            {
+                "id": f["format_id"],
+                "label": f"{_format_label(f)} [{f['format_id']}]",
+                "ext": f.get("ext"),
+                "height": f.get("height"),
+                "width": f.get("width"),
+                "vcodec": f.get("vcodec"),
+                "tbr": f.get("tbr"),
+                "filesize": f.get("filesize") or f.get("filesize_approx"),
+            }
+            for f in video_raw
+        ]
+        audio_options = [
+            {
+                "id": f["format_id"],
+                "label": f"{_format_label(f)} [{f['format_id']}]",
+                "ext": f.get("ext"),
+                "abr": f.get("abr"),
+                "acodec": f.get("acodec"),
+                "tbr": f.get("tbr"),
+                "filesize": f.get("filesize") or f.get("filesize_approx"),
+            }
+            for f in audio_raw
+        ]
+
+        # 按分辨率降序、按码率降序
+        video_options.sort(
+            key=lambda x: (x.get("height") or 0, x.get("tbr") or 0), reverse=True
+        )
+        audio_options.sort(key=lambda x: x.get("abr") or 0, reverse=True)
+
+        return {
+            "title": info.get("title"),
+            "youtube_id": info.get("id"),
+            "duration": info.get("duration"),
+            "uploader": info.get("uploader") or info.get("channel"),
+            "upload_date": info.get("upload_date"),
+            "description": info.get("description"),
+            "thumbnail": info.get("thumbnail"),
+            "video_formats": video_options,
+            "audio_formats": audio_options,
+        }

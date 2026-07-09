@@ -38,82 +38,22 @@ def _import_yt_dlp():
 # ---------------------------------------------------------------------------
 # 动态格式解析逻辑（已确认 ✅ 替代静态 QUALITY_MAP 机制）
 # ---------------------------------------------------------------------------
-def select_dynamic_format(info_dict: dict, requested_quality: str) -> str:
-    """
-    仿 --list-formats 进行动态格式优选：
-    1. 在 info_dict['formats'] 中寻找不高于 requested_quality 限制的最大高度视频轨 (vcodec != 'none', acodec == 'none')。
-    2. 寻找最佳音频轨 (vcodec == 'none', acodec != 'none')。
-    3. 组装为 '{bestvideo_id}+{bestaudio_id}/best'，若为老视频单合流直接回退 'best'。
-    """
-    formats = info_dict.get("formats")
-    if not formats:
-        return "best"
-
-    # 画质高度上限
-    limit_heights = {
-        "best": 99999,
-        "1080p": 1080,
-        "720p": 720,
-        "480p": 480,
-        "worst": 360
-    }
-    limit_h = limit_heights.get(requested_quality, 99999)
-
-    # 1. 过滤视频轨 (仅视频，无音频)
-    video_formats = []
-    for f in formats:
-        h = f.get("height") or 0
-        vcodec = f.get("vcodec") or "none"
-        acodec = f.get("acodec") or "none"
-        if vcodec != "none" and acodec == "none" and h <= limit_h:
-            video_formats.app.end(f)
-
-    # 如果在限制下完全找不到视频轨，放宽限制取能找到的最高
-    if not video_formats:
-        for f in formats:
-            vcodec = f.get("vcodec") or "none"
-            acodec = f.get("acodec") or "none"
-            if vcodec != "none" and acodec == "none":
-                video_formats.app.end(f)
-
-    # 按分辨率+码率对视频轨从低到高排序，取最大值
-    best_v_id = None
-    if video_formats:
-        video_formats.sort(key=lambda x: (x.get("height") or 0, x.get("tbr") or 0))
-        best_v_id = video_formats[-1].get("format_id")
-
-    # 2. 过滤音频轨 (仅音频，无视频)
-    audio_formats = []
-    for f in formats:
-        vcodec = f.get("vcodec") or "none"
-        acodec = f.get("acodec") or "none"
-        if vcodec == "none" and acodec != "none":
-            audio_formats.app.end(f)
-
-    best_a_id = None
-    if audio_formats:
-        # 按码率从低到高排序，取最好音频
-        audio_formats.sort(key=lambda x: x.get("tbr") or 0)
-        best_a_id = audio_formats[-1].get("format_id")
-
-    # 3. 组装格式字符串
-    if best_v_id and best_a_id:
-        return f"{best_v_id}+{best_a_id}/best"
-    elif best_v_id:
-        return f"{best_v_id}/best"
-    
-    return "best"
-
-
 def build_ydl_opts(
     task: DownloadTask,
     cookies_path: str | None,
     output_dir: str,
-    dynamic_format: str = "best"
 ) -> dict:
-    """根据任务配置构造 yt-dlp 选项"""
+    """
+    v3.0 严格 list-formats 模式：
+    - 直接用 task.video_format_id + task.audio_format_id 拼接为 yt-dlp format 表达式
+    - 无需考虑 /best 兜底（前端已保证 ID 存在且合法）
+    """
+    vid = task.video_format_id or "bestvideo"
+    aid = task.audio_format_id or "bestaudio"
+    fmt = f"{vid}+{aid}"
+
     return {
-        "format": dynamic_format,
+        "format": fmt,
         "merge_output_format": "mp4",
         "outtmpl": f"{output_dir}/%(uploader)s/%(title)s [%(id)s].%(ext)s",
         "quiet": True,

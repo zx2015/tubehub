@@ -37,8 +37,8 @@ export interface DownloadTaskRead {
   url: string;
   youtube_id: string | null;
   title: string | null;
-  format_type: string;
-  quality: string;
+  video_format_id: number | null;
+  audio_format_id: number | null;
   status: DownloadStatus | string;
   progress: number;
   speed: string | null;

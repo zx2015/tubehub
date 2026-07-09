@@ -1,21 +1,40 @@
-"""下载相关 Pydantic Schemas
+"""下载相关 Pydantic Schemas (v3.0 双 select 严格 list-formats)
 
 复刻自 docs/design/02-api-design.md §2.2.1
 """
 from pydantic import BaseModel, Field, HttpUrl
-from typing import Literal, Optional
+from typing import Optional
 from datetime import datetime
 
 
+# ----------------------------------------------------------------------
+# 视频格式选项 (单条)
+# ----------------------------------------------------------------------
+class VideoFormatOption(BaseModel):
+    id: str                          # yt-dlp format_id（字符串，例如 "137"）
+    label: str                       # 人类可读，例如 "1080p avc · 250MB · mp4 [137]"
+    ext: Optional[str] = None
+    height: Optional[int] = None
+    width: Optional[int] = None
+    vcodec: Optional[str] = None
+    abr: Optional[int] = None
+    acodec: Optional[str] = None
+    tbr: Optional[float] = None
+    filesize: Optional[int] = None
+
+
+# ----------------------------------------------------------------------
+# /api/downloads/check — 🔍 检测冲突 (v3.0：返回真实 list-formats)
+# ----------------------------------------------------------------------
 class DownloadCheckRequest(BaseModel):
-    """POST /api/downloads/check 请求体"""
     url: HttpUrl
 
 
 class ExistingVideoInfo(BaseModel):
     id: int
     title: str
-    quality_label: Optional[str]
+    video_format_id: Optional[int] = None
+    audio_format_id: Optional[int] = None
     file_size: int
     last_position: float
 
@@ -25,36 +44,55 @@ class DownloadCheckResponse(BaseModel):
     youtube_id: Optional[str] = None
     title: Optional[str] = None
     duration: Optional[int] = None
+    uploader: Optional[str] = None
     is_playlist: bool = False
     playlist_entries: Optional[list[dict]] = None
     existing_video: Optional[ExistingVideoInfo] = None
+    # v3.0 双 select 下拉项
+    video_formats: list[VideoFormatOption] = []
+    audio_formats: list[VideoFormatOption] = []
+
+
+# ----------------------------------------------------------------------
+# /api/downloads — 创建任务（提交双 format_id）
+# ----------------------------------------------------------------------
+class PlaylistEntryCreate(BaseModel):
+    """歌单模式下，单条子视频的格式选择。"""
+    youtube_id: str
+    title: Optional[str] = None
+    video_format_id: str
+    audio_format_id: str
 
 
 class DownloadCreateRequest(BaseModel):
-    """POST /api/downloads 请求体"""
     url: HttpUrl
-    format_type: Literal["video"] = "video"     # 已裁切仅音频
-    quality: Literal["best", "1080p", "720p", "480p", "worst"]
+    # v3.0 双 select 严格模式：单视频必填
+    video_format_id: Optional[str] = None
+    audio_format_id: Optional[str] = None
+    # 歌单模式：每条子视频单独选好格式
+    playlist_entries: Optional[list[PlaylistEntryCreate]] = None
     overwrite: bool = False
-    download_subtitles: bool = False             # 字幕已确认不做，预留
 
 
+# ----------------------------------------------------------------------
+# /api/downloads/{id} — 读取任务
+# ----------------------------------------------------------------------
 class DownloadTaskRead(BaseModel):
     id: int
     url: str
-    youtube_id: Optional[str]
-    title: Optional[str]
-    format_type: str
-    quality: str
+    youtube_id: Optional[str] = None
+    title: Optional[str] = None
+    video_format_id: Optional[int] = None
+    audio_format_id: Optional[int] = None
     status: str
     progress: float
-    speed: Optional[str]
-    eta: Optional[str]
-    error_message: Optional[str]
+    speed: Optional[str] = None
+    eta: Optional[str] = None
+    error_message: Optional[str] = None
     retry_count: int
     max_retries: int
     created_at: datetime
-    finished_at: Optional[datetime]
+    finished_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

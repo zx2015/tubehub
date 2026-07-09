@@ -1,35 +1,27 @@
-version: "3.9"
-
 services:
   tubehub:
     build:
       context: .
+      dockerfile: Dockerfile
+      network: host
       args:
-        - http_proxy=${HTTP_PROXY}
-        - https_proxy=${HTTPS_PROXY}
+        - HTTP_PROXY=http://10.182.67.191:8080
+        - HTTPS_PROXY=http://10.182.67.191:8080
     container_name: tubehub
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      # 1. 必须挂载整个项目目录以包含 .git 执行 git pull 自动更新
-      - .:/app
-      # 2. 映射数据、日志与前端
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./frontend/dist:/app/static:ro
+      - /home/tubehub/repo/backend/app:/app/backend/app:ro
+      - /home/tubehub/repo/data:/app/data
+      - /home/tubehub/repo/logs:/app/logs
     environment:
-      - SECRET_KEY=${SECRET_KEY:?required}
-      - DATABASE_URL=sqlite+aiosqlite:///./data/tubehub.db
-      - DATA_DIR=/app/data
-      - VIDEOS_DIR=/app/data/videos
-      - THUMBNAILS_DIR=/app/data/thumbnails
-      - LOGS_DIR=/app/logs
-      - MAX_CONCURRENT_DOWNLOADS=2
-      # 3. 统一全局网络代理环境变量
-      - HTTP_PROXY=${HTTP_PROXY}
-      - HTTPS_PROXY=${HTTPS_PROXY}
+      - PYTHONPATH=/app/backend
+      - HTTP_PROXY=http://10.182.67.191:8080
+      - HTTPS_PROXY=http://10.182.67.191:8080
       - NO_PROXY=localhost,127.0.0.1
+      - SECRET_KEY=99a38f3214daef129487bcda12487ab1
+      - SESSION_SECRET_KEY=29b1056acdf129bcba13697de831a29b
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s

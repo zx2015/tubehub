@@ -1,215 +1,286 @@
-/**
- * AddDownloadDialog — 新增下载对话窗口（经典居中遮罩美学）
- *
- * 设计依据：docs/design/04-frontend-components.md §4.7
- *
- * 重构（2026-07-08）：
- *  - 100% 独立于页面主流，以绝对定位（position: fixed）与高 z-index 浮动在页面最上方。
- *  - 配备半透明黑色遮罩（rgba(0, 0, 0, 0.6)），阻断焦点，使用户视线完全聚焦于新增表单。
- */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+
+interface FormatOption {
+  id: number;
+  label: string;
+  // 可选的扩展字段
+  ext?: string;
+  height?: number;
+  vcodec?: string;
+  abr?: number;
+  acodec?: string;
+  filesize?: number | null;
+}
+
+interface CheckResponse {
+  exists: boolean;
+  existing_video?: {
+    id: number;
+    title: string;
+  } | null;
+  youtube_id?: string | null;
+  title?: string | null;
+  thumbnail?: string | null;
+  video_formats?: FormatOption[];
+  audio_formats?: FormatOption[];
+}
 
 interface AddDownloadDialogProps {
   open: boolean;
   onClose: () => void;
-  onCreated?: () => void;
+  onCreated?: (taskId: number) => void;
 }
 
-type Quality = 'best' | '1080p' | '720p' | '480p' | 'worst';
-
-export function AddDownloadDialog({ open, onClose, onCreated }: AddDownloadDialogProps) {
+export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownloadDialogProps) {
   const [url, setUrl] = useState('');
-  const [quality, setQuality] = useState<Quality>('best');
+  const [checking, setChecking] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [checkResult, setCheckResult] = useState<CheckResponse | null>(null);
+  const [videoFormatId, setVideoFormatId] = useState<number | ''>('');
+  const [audioFormatId, setAudioFormatId] = useState<number | ''>('');
   const [overwrite, setOverwrite] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [checkResult, setCheckResult] = useState<{
-    conflict: boolean;
-    title?: string;
-  } | null>(null);
-
-  // 每次打开弹窗时，状态复位
-  useEffect(() => {
-    if (open) {
-      setUrl('');
-      setQuality('best');
-      setOverwrite(false);
-      setSubmitting(false);
-      setError(null);
-      setCheckResult(null);
-    }
-  }, [open]);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!open) return null;
 
-  const handleClose = () => {
-    onClose();
-  };
-
   const handleCheck = async () => {
     if (!url.trim()) {
-      setError('请输入有效的 URL');
+      setErrorMsg('请先粘贴 YouTube 视频链接');
       return;
     }
-    setError(null);
+    setChecking(true);
+    setErrorMsg(null);
+    setCheckResult(null);
     try {
-      const resp = await fetch('/api/downloads/check', {
+      const res = await fetch('/api/downloads/check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: url.trim() }),
       });
-      if (!resp.ok) {
-        setCheckResult({ conflict: false });
-        return;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: CheckResponse = await res.json();
+      setCheckResult(data);
+
+      // 默认选中第一个
+      if (data.video_formats && data.video_formats.length > 0) {
+        setVideoFormatId(data.video_formats[0].id);
+      } else {
+        setVideoFormatId('');
       }
-      const data = await resp.json();
-      setCheckResult({
-        conflict: Boolean(data?.conflict),
-        title: data?.title ?? undefined,
-      });
-    } catch {
-      setCheckResult({ conflict: false });
+      if (data.audio_formats && data.audio_formats.length > 0) {
+        setAudioFormatId(data.audio_formats[0].id);
+      } else {
+        setAudioFormatId('');
+      }
+
+      // 如果已存在，自动勾选覆盖
+      if (data.exists) {
+        setOverwrite(true);
+      }
+    } catch (e: any) {
+      setErrorMsg(`解析失败: ${e?.message ?? e}`);
+    } finally {
+      setChecking(false);
     }
   };
 
   const handleSubmit = async () => {
-    if (!url.trim()) {
-      setError('请输入有效的 URL');
+    if (!checkResult) {
+      setErrorMsg('请先点击"获取信息"');
       return;
     }
-    setSubmitting(true);
-    setError(null);
+    if (!videoFormatId || !audioFormatId) {
+      setErrorMsg('视频格式与音频格式都必须选择');
+      return;
+    }
+    if (checkResult.exists && !overwrite) {
+      setErrorMsg('该视频已下载，请勾选"覆盖已存在"后重试');
+      return;
+    }
+    setCreating(true);
+    setErrorMsg(null);
     try {
-      const resp = await fetch('/api/downloads', {
+      const res = await fetch('/api/downloads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: url.trim(),
-          format_type: 'video',
-          quality,
+          video_format_id: Number(videoFormatId),
+          audio_format_id: Number(audioFormatId),
           overwrite,
         }),
       });
-      if (!resp.ok) {
-        const text = await resp.text();
-        setError(`提交失败: ${text || '未知错误'}`);
-        setSubmitting(false);
-        return;
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
       }
-      onCreated?.();
+      const data = await res.json();
+      onCreated?.(data.id ?? 0);
       handleClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '提交失败');
-      setSubmitting(false);
+    } catch (e: any) {
+      setErrorMsg(`提交失败: ${e?.message ?? e}`);
+    } finally {
+      setCreating(false);
     }
   };
 
+  const handleClose = () => {
+    setUrl('');
+    setCheckResult(null);
+    setVideoFormatId('');
+    setAudioFormatId('');
+    setOverwrite(false);
+    setErrorMsg(null);
+    onClose();
+  };
+
+  // (formatBytes removed: each format's label is precomputed on backend)
+
   return (
     <div
-      className="add-download-backdrop"
+      className="add-download__backdrop"
       role="dialog"
       aria-modal="true"
-      onClick={handleClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) handleClose();
+      }}
     >
-      <div className="add-download-window" onClick={(e) => e.stopPropagation()}>
-        <div className="add-download-window__header">
-          <h2 className="add-download-window__title">📺 新建下载任务</h2>
-          <button type="button" className="add-download-window__close" onClick={handleClose} title="关闭">
-            ❌
+      <div className="add-download__modal" onClick={(e) => e.stopPropagation()}>
+        <header className="add-download__header">
+          <h2 className="add-download__title">新增下载</h2>
+          <button
+            type="button"
+            className="add-download__close"
+            onClick={handleClose}
+            aria-label="关闭"
+          >
+            ✕
           </button>
-        </div>
+        </header>
 
-        <div className="add-download-window__body">
-          <div className="add-download-window__field">
-            <label>YouTube 视频 / 歌单 URL</label>
-            <input
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://www.youtube.com/watch?v=..."
-              disabled={submitting}
-            />
-          </div>
-
-          <div className="add-download-window__row">
-            <div className="add-download-window__field">
-              <label>格式</label>
-              <input type="text" value="视频 (.mp4)" disabled />
-            </div>
-
-            <div className="add-download-window__field">
-              <label>画质</label>
-              <select
-                value={quality}
-                onChange={(e) => setQuality(e.target.value as Quality)}
-                disabled={submitting}
+        <div className="add-download__body">
+          {/* URL + 获取信息 按钮 */}
+          <div className="add-download__row add-download__row--url">
+            <label className="add-download__label">YouTube 链接</label>
+            <div className="add-download__url-group">
+              <input
+                className="add-download__input"
+                type="text"
+                placeholder="https://www.youtube.com/watch?v=..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !checking) handleCheck();
+                }}
+              />
+              <button
+                type="button"
+                className="add-download__btn add-download__btn--primary"
+                onClick={handleCheck}
+                disabled={checking || !url.trim()}
               >
-                <option value="best">最佳</option>
-                <option value="1080p">1080p</option>
-                <option value="720p">720p</option>
-                <option value="480p">480p</option>
-                <option value="worst">最低</option>
-              </select>
+                {checking ? '解析中...' : '获取信息'}
+              </button>
             </div>
           </div>
 
-          <div style={{ marginTop: '4px' }}>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              style={{ width: '100%', height: '32px', fontSize: '12px' }}
-              onClick={handleCheck}
-              disabled={!url.trim() || submitting}
-            >
-              🔍 检测冲突 (防重下载)
-            </button>
-          </div>
-
+          {/* 解析结果区域 */}
           {checkResult && (
-            <div className="add-download-window__conflict">
-              {checkResult.conflict ? (
-                <>
-                  <p>⚠️ 视频已在库中：</p>
-                  <p className="conflict-title"><strong>{checkResult.title ?? '未知标题'}</strong></p>
-                  <label className="conflict-checkbox">
+            <>
+              {checkResult.exists && checkResult.existing_video && (
+                <div className="add-download__notice add-download__notice--warn">
+                  ⚠️ 该视频已在库中: <strong>{checkResult.existing_video.title}</strong>
+                </div>
+              )}
+
+              {/* Title 一行 */}
+              {checkResult.title && (
+                <div className="add-download__row">
+                  <label className="add-download__label">标题</label>
+                  <div className="add-download__readonly">{checkResult.title}</div>
+                </div>
+              )}
+
+              {/* 视频格式一行 */}
+              {checkResult.video_formats && checkResult.video_formats.length > 0 && (
+                <div className="add-download__row">
+                  <label className="add-download__label">视频格式</label>
+                  <select
+                    className="add-download__select"
+                    value={videoFormatId}
+                    onChange={(e) => setVideoFormatId(Number(e.target.value))}
+                  >
+                    {checkResult.video_formats.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* 音频格式一行 */}
+              {checkResult.audio_formats && checkResult.audio_formats.length > 0 && (
+                <div className="add-download__row">
+                  <label className="add-download__label">音频格式</label>
+                  <select
+                    className="add-download__select"
+                    value={audioFormatId}
+                    onChange={(e) => setAudioFormatId(Number(e.target.value))}
+                  >
+                    {checkResult.audio_formats.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* 覆盖选项（仅在已存在时显示） */}
+              {checkResult.exists && (
+                <div className="add-download__row add-download__row--checkbox">
+                  <label className="add-download__checkbox">
                     <input
                       type="checkbox"
                       checked={overwrite}
                       onChange={(e) => setOverwrite(e.target.checked)}
                     />
-                    覆盖现有文件
+                    <span>覆盖已存在的视频</span>
                   </label>
-                </>
-              ) : (
-                <p className="conflict-ok">✅ 此视频未在库中，可以安全下载</p>
+                </div>
               )}
-            </div>
+            </>
           )}
 
-          {error && <div className="add-download-window__error">⚠️ {error}</div>}
+          {errorMsg && <div className="add-download__error">{errorMsg}</div>}
         </div>
 
-        <div className="add-download-window__footer">
+        <footer className="add-download__footer">
           <button
             type="button"
-            className="btn btn--ghost"
+            className="add-download__btn"
             onClick={handleClose}
-            disabled={submitting}
+            disabled={creating}
           >
             取消
           </button>
           <button
             type="button"
-            className="btn btn--primary"
+            className="add-download__btn add-download__btn--success"
             onClick={handleSubmit}
-            disabled={submitting || !url.trim()}
+            disabled={
+              creating ||
+              !checkResult ||
+              !videoFormatId ||
+              !audioFormatId ||
+              (checkResult.exists && !overwrite)
+            }
           >
-            {submitting ? '🚀 提交中…' : '添加'}
+            {creating ? '🚀 任务创建中...' : '开始下载'}
           </button>
-        </div>
+        </footer>
       </div>
     </div>
   );
 }
-
-export default AddDownloadDialog;

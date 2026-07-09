@@ -1005,3 +1005,220 @@ button {
   height: 34px;
   font-size: 13px;
 }
+
+/* v3.0 格式角标样式 */
+.download-row__format-badge {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 11px;
+  background: var(--bg-secondary);
+  color: var(--fg-secondary);
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+
+/* ============== AddDownloadDialog v3.0 (新增下载) 专属样式 ============== */
+.add-download__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.add-download__modal {
+  background: var(--surface, #1f1f1f);
+  color: var(--text, #f1f1f1);
+  border-radius: 12px;
+  width: 720px;          /* 1.5x of original ~480px */
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  font-size: 12px;       /* base 12px */
+  line-height: 1.6;
+}
+
+.add-download__header {
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.add-download__title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.add-download__close {
+  background: none;
+  border: none;
+  color: var(--text-muted, #aaa);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 6px;
+}
+
+.add-download__close:hover { color: var(--accent, #ff0000); }
+
+.add-download__body {
+  padding: 20px 24px;
+  flex: 1;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.add-download__row {
+  margin-bottom: 14px;
+}
+
+.add-download__row--url {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.add-download__url-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.add-download__label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: var(--text-muted, #aaa);
+}
+
+.add-download__input,
+.add-download__select {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  color: var(--text, #f1f1f1);
+  box-sizing: border-box;
+}
+
+.add-download__input:focus,
+.add-download__select:focus {
+  outline: none;
+  border-color: var(--accent, #ff0000);
+  background: rgba(255,255,255,0.06);
+}
+
+.add-download__btn {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
+  color: var(--text, #f1f1f1);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.add-download__btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.12);
+}
+
+.add-download__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.add-download__btn--primary {
+  background: var(--accent, #ff0000);
+  border-color: var(--accent, #ff0000);
+  color: #fff;
+}
+
+.add-download__btn--primary:hover:not(:disabled) {
+  background: #cc0000;
+  border-color: #cc0000;
+}
+
+.add-download__btn--success {
+  background: #2ea44f;
+  border-color: #2ea44f;
+  color: #fff;
+}
+
+.add-download__btn--success:hover:not(:disabled) {
+  background: #22863a;
+}
+
+.add-download__readonly {
+  padding: 8px 10px;
+  font-size: 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px dashed rgba(255,255,255,0.12);
+  border-radius: 6px;
+  color: var(--text-muted, #aaa);
+  min-height: 16px;
+}
+
+.add-download__row--checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted, #aaa);
+}
+
+.add-download__checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.add-download__notice {
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-top: 8px;
+  background: rgba(255,0,0,0.08);
+  border: 1px solid rgba(255,0,0,0.3);
+  color: #ff8080;
+}
+
+.add-download__notice--warn {
+  background: rgba(255,170,0,0.08);
+  border-color: rgba(255,170,0,0.3);
+  color: #ffcc80;
+}
+
+.add-download__error {
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-top: 8px;
+  background: rgba(255,0,0,0.12);
+  border: 1px solid rgba(255,0,0,0.4);
+  color: #ff8a8a;
+}
+
+.add-download__footer {
+  padding: 16px 24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
