@@ -84,14 +84,33 @@ def _audio_label(f: dict) -> str:
 
 
 def _is_thumbnail(f: dict) -> bool:
-    vcodec = f.get("vcodec") or ""
-    return vcodec == "images"
+    """缩略图 mhtml 格式"""
+    return (f.get("vcodec") or "") == "images"
 
 
 def _is_progressive(f: dict) -> bool:
+    """Progressive 混合轨：双 ID 合并策略下不需要"""
     vcodec = f.get("vcodec") or "none"
     acodec = f.get("acodec") or "none"
     return vcodec != "none" and acodec != "none"
+
+
+def _is_compatible_video(f: dict) -> bool:
+    """严格过滤：仅保留 mp4 + avc1（H.264）视频轨
+    优势:1) FFmpeg -c copy 零转码合并
+         2) 浏览器/video.js 100% 兼容
+         3) 文件最小、合并最快
+    """
+    ext = f.get("ext") or ""
+    vcodec = f.get("vcodec") or ""
+    return ext == "mp4" and vcodec.startswith("avc1")
+
+
+def _is_compatible_audio(f: dict) -> bool:
+    """严格过滤：仅保留 m4a + mp4a（AAC）音频轨"""
+    ext = f.get("ext") or ""
+    acodec = f.get("acodec") or ""
+    return ext == "m4a" and acodec.startswith("mp4a")
 
 
 class ScraperService:
@@ -117,9 +136,14 @@ class ScraperService:
         for f in formats:
             if _is_thumbnail(f):
                 continue
-            vcodec = f.get("vcodec") or "none"
-            acodec = f.get("acodec") or "none"
-            if vcodec != "none" and acodec == "none":
+            # 排除 progressive 混合轨（双 ID 拼接策略不需要）
+            vcodec_raw = f.get("vcodec") or "none"
+            acodec_raw = f.get("acodec") or "none"
+            if vcodec_raw != "none" and acodec_raw != "none":
+                continue
+            vcodec = vcodec_raw
+            acodec = acodec_raw
+            if _is_compatible_video(f):
                 video_options.append({
                     "id": f.get("format_id"),
                     "label": _video_label(f),
@@ -129,7 +153,7 @@ class ScraperService:
                     "tbr": f.get("tbr"),
                     "filesize": f.get("filesize"),
                 })
-            elif acodec != "none" and vcodec == "none":
+            elif _is_compatible_audio(f):
                 audio_options.append({
                     "id": f.get("format_id"),
                     "label": _audio_label(f),
