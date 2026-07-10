@@ -5,23 +5,23 @@ services:
       dockerfile: Dockerfile
       network: host
       args:
-        - HTTP_PROXY=http://10.182.67.191:8080
-        - HTTPS_PROXY=http://10.182.67.191:8080
+        - HTTP_PROXY=${HTTP_PROXY:-}
+        - HTTPS_PROXY=${HTTPS_PROXY:-}
+    image: tubehub:latest
     container_name: tubehub
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      - /home/tubehub/repo/backend/app:/app/backend/app:ro
+      # 只挂载运行时数据目录（不挂载代码，从镜像运行）
       - /home/tubehub/repo/data:/app/data
       - /home/tubehub/repo/logs:/app/logs
     environment:
       - PYTHONPATH=/app/backend
-      - HTTP_PROXY=http://10.182.67.191:8080
-      - HTTPS_PROXY=http://10.182.67.191:8080
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=localhost,127.0.0.1
-      - SECRET_KEY=99a38f3214daef129487bcda12487ab1
-      - SESSION_SECRET_KEY=29b1056acdf129bcba13697de831a29b
+      - SECRET_KEY=${SECRET_KEY:-tubehub-change-me-in-production}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s

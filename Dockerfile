@@ -1,18 +1,53 @@
+# ============================================================
+# Stage 1: 前端构建（仅 package*.json 变化时才重跑 npm ci）
+# ============================================================
 FROM node:20-alpine AS frontend-builder
 WORKDIR /build
+
+# 单独 COPY 依赖描述文件，利用 Docker 层缓存
+# 只要 package.json / package-lock.json 未变，此层完全命中缓存
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci --prefer-offline
+
+# 再 COPY 源码并构建
 COPY frontend/ ./
 RUN npm run build
+
+# ============================================================
+# Stage 2: 后端运行时
+# ============================================================
 FROM python:3.12-slim
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+
+# 使用国内镜像源
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
-RUN apt-get update && apt-get install -y ffmpeg curl git ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# 单独 COPY requirements.txt，依赖不变时完全命中缓存
 COPY backend/requirements.txt ./backend/
-RUN pip install --no-cache-dir --proxy http://10.182.67.191:8080 -r backend/requirements.txt
+
+# pip 缓存由 BuildKit 的 --mount=type=cache 管理；
+# 代理通过 ARG 注入，仅构建阶段生效，不污染运行时镜像
+RUN pip install \
+    ${HTTP_PROXY:+--proxy $HTTP_PROXY} \
+    -r backend/requirements.txt
+
+# 后端源码（变更最频繁，放最后）
 COPY backend/ ./backend/
+
+# 前端构建产物
 COPY --from=frontend-builder /build/dist /app/backend/static
-COPY backend/app/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-HEALTHCHECK CMD curl -f http://localhost:8000/api/health || exit 1
-ENTRYPOINT ["/entrypoint.sh"]
+
+# 启动脚本
+RUN chmod +x /app/backend/app/entrypoint.sh
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
+
+ENTRYPOINT ["/app/backend/app/entrypoint.sh"]
