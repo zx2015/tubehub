@@ -61,6 +61,42 @@ button {
   flex-shrink: 0;
 }
 
+/* navbar 左侧：汉堡 + 品牌 */
+.navbar__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 汉堡折叠按钮 */
+.sidebar__toggle-btn {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 40px;
+  height: 40px;
+  padding: 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sidebar__toggle-btn span {
+  display: block;
+  width: 100%;
+  height: 2px;
+  background-color: var(--fg);
+  border-radius: 2px;
+  transition: background-color var(--transition);
+}
+
+.sidebar__toggle-btn:hover {
+  background-color: var(--hover-bg);
+}
+
 .navbar__brand {
   display: flex;
   align-items: center;
@@ -139,6 +175,29 @@ button {
   border-right: 1px solid var(--border);
   flex-shrink: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  /* 折叠动画 */
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 折叠态：只显示图标 */
+.sidebar--collapsed {
+  width: var(--sidebar-mini);
+}
+
+.sidebar--collapsed .sidebar__text,
+.sidebar--collapsed .sidebar__divider,
+.sidebar--collapsed .sidebar__footer {
+  display: none;
+}
+
+.sidebar--collapsed .sidebar__item {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar--collapsed .sidebar__nav {
+  align-items: center;
 }
 
 .sidebar__nav {

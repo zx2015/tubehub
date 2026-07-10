@@ -8,8 +8,17 @@
 | :--- | :--- | :--- | :--- |
 | v1.0.0 | 2026-07-07 | 初始集成设计 | Gemini CLI |
 | v1.1.0 | 2026-07-07 | 追加动态格式、cookies、代理配置与端到端下载流程说明 | Gemini CLI |
+| v1.1.1 | 2026-07-10 | 按当前代码修正：单视频流程、格式过滤策略、清理任务状态 | Copilot |
 
 ---
+
+## 3.x 当前实现对照（2026-07-10）
+
+1. `POST /api/downloads` 当前实现为**单视频任务**，未实现歌单拆解入队。
+2. `ScraperService` 只保留浏览器兼容轨道：视频 `mp4 + avc1`、音频 `m4a + mp4a`，并过滤 progressive 与缩略图轨道。
+3. worker 下载阶段直接使用已入库的 `video_format_id+audio_format_id`，未再执行“运行时动态二次优选”。
+4. 缩略图下载由 `httpx.AsyncClient` 依赖环境变量代理，函数签名中无显式 `proxy_url` 参数。
+5. `task_cleaner_loop` / `history_cleaner_loop` 目前是占位循环，尚未落地数据库清理逻辑。
 
 ## 3.0 端到端下载处理流程
 

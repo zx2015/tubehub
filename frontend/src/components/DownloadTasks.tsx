@@ -43,10 +43,13 @@ function TaskRow({ task, onCancel, onRetry, onDelete }: TaskRowProps) {
   }, []);
 
   const sseUrl =
-    live.status === 'downloading' || live.status === 'merging' || live.status === 'queued'
+    live.status === 'downloading' ||
+    live.status === 'merging' ||
+    live.status === 'queued' ||
+    live.status === 'pending'
       ? `/api/downloads/${task.id}/stream`
       : null;
-  useSSE<DownloadTaskRead>(sseUrl || '', onProgressPush);
+  useSSE<DownloadTaskRead>(sseUrl, onProgressPush);
 
   useEffect(() => {
     setLive(task);

@@ -1,13 +1,9 @@
 /**
  * useSSE — 订阅服务器发送事件（Server-Sent Events）
  *
- * 设计依据：docs/design/04-frontend-components.md §4.3.2
- *
- * 关键修复（2026-07-07）：
- *  - url 变化时才重建连接（避免父组件回调频繁导致抖动）
- *  - 组件卸载时关闭 EventSource
- *  - 使用 ref 持有最新 onMessage 闭包，引用稳定
- *  - 支持标准 SSE event: 命名空间：默认处理 'message'，并把 'error' 透传
+ * 兼容两种 SSE 格式：
+ *  - 无名事件（`data: ...`）：由 onmessage 接收
+ *  - 具名事件（`event: progress\ndata: ...`）：由 addEventListener 接收
  */
 import { useEffect, useRef } from 'react';
 
@@ -15,7 +11,7 @@ export function useSSE<T = unknown>(
   url: string | null | undefined,
   onMessage: (data: T) => void,
 ): void {
-  // 把最新的回调塞到 ref 里，避免 onMessage 引用变化引发 useEffect 反复重连
+  // ref 持有最新回调，避免 url 不变时反复重建连接
   const handlerRef = useRef(onMessage);
   useEffect(() => {
     handlerRef.current = onMessage;
@@ -26,7 +22,7 @@ export function useSSE<T = unknown>(
 
     const es = new EventSource(url);
 
-    es.onmessage = (e) => {
+    const handle = (e: MessageEvent) => {
       try {
         const parsed = JSON.parse(e.data) as T;
         handlerRef.current(parsed);
@@ -36,13 +32,20 @@ export function useSSE<T = unknown>(
       }
     };
 
+    // 无名事件（data: ... 无 event: 前缀）
+    es.onmessage = handle;
+
+    // 具名 progress 事件（event: progress\ndata: ...）
+    es.addEventListener('progress', handle);
+
     es.onerror = () => {
-      // EventSource 自身具备自动重连机制，仅记录日志
+      // EventSource 内置自动重连，仅记录日志
       // eslint-disable-next-line no-console
       console.warn(`[useSSE] connection lost / reconnecting: ${url}`);
     };
 
     return () => {
+      es.removeEventListener('progress', handle);
       es.close();
     };
   }, [url]);

@@ -8,18 +8,18 @@
 | :--- | :--- | :--- | :--- |
 | v1.0.0 | 2026-07-07 | 初始版本 | Gemini CLI |
 | v2.0.0 | 2026-07-08 | 新增"容器自愈启动入口"机制（git pull + pip upgrade on boot） | Gemini CLI |
+| v2.0.1 | 2026-07-10 | 按当前代码修正 entrypoint 与部署行为说明 | Copilot |
 
 ## 7.1 启动顺序
 
-### 7.1.0 容器自愈启动入口（v2.0.0 新增 ✅）
+### 7.1.0 容器启动入口（当前实现）
 
-> `backend/app/entrypoint.sh` 是 Docker 容器的统一启动入口。
+`backend/app/entrypoint.sh` 是 Docker 容器的统一启动入口。
 
-**核心能力**：
-1. 自动读取宿主机 `.env` 中的 `HTTP_PROXY` / `HTTPS_PROXY` 并注册给 Git 全局代理
-2. 强行 `git reset --hard` + `git pull` 拉取最新代码（实现版本强同步）
-3. `pip install --upgrade pip` + `pip install --upgrade -r requirements.txt`（依赖热升级）
-4. 切换到 `backend/` 工作目录，启动 Uvicorn
+**当前能力**：
+1. 切换目录到 `/app/backend`
+2. 设置 `PYTHONPATH=/app/backend`
+3. 以 `uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1` 启动
 
 **执行时序**：
 ```mermaid
@@ -27,23 +27,12 @@ sequenceDiagram
     autonumber
     participant DC as Docker Daemon
     participant E as entrypoint.sh
-    participant GH as GitHub
-    participant PyPI as pip Registry
     participant UV as Uvicorn
 
     DC->>E: docker compose up (启动容器)
-    E->>E: 检测 $HTTP_PROXY 环境变量
-    alt 存在代理
-        E->>E: git config --global http.proxy $HTTP_PROXY
-    end
-    E->>E: git reset --hard (丢弃 Working Tree Dirty)
-    E->>GH: git fetch --all
-    E->>GH: git pull origin main
-    GH-->>E: 最新代码已拉取
-    E->>E: pip install --upgrade pip
-    E->>PyPI: pip install --upgrade -r requirements.txt
-    PyPI-->>E: 所有依赖已升级至最新稳定版
-    E->>UV: cd backend && exec uvicorn app.main:app
+    E->>E: cd /app/backend
+    E->>E: export PYTHONPATH=/app/backend
+    E->>UV: exec uvicorn app.main:app --workers 1
     UV-->>DC: 监听 0.0.0.0:8000
 ```
 
@@ -56,7 +45,7 @@ git add -A && git commit -m "..." && git push origin main
 ssh tcagent-z15 "cd /home/tubehub/repo && docker compose restart tubehub"
 ```
 
-容器将自动拉取最新代码、升级 Python 依赖、保持容器内代码与 GitHub 强一致。
+代码更新与依赖升级需通过重新构建镜像完成，启动脚本本身不执行 git/pip 自愈动作。
 
 ### 7.1.1 本地 venv 启动
 

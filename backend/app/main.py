@@ -87,7 +87,13 @@ async def spa_catchall(full_path: str):
     # API 路由交由 FastAPI 自身的 404 处理
     if full_path.startswith("api/"):
         return JSONResponse(status_code=404, content={"detail": "Not Found"})
-    # 静态文件资源（assets 等）应已被 mount 命中；这里只兜底 SPA 路由
+
+    # 根目录静态文件直通：favicon.svg / robots.txt / manifest.json 等
+    static_file = _osp.join(STATIC_DIR, full_path)
+    if full_path and _osp.isfile(static_file):
+        return FileResponse(static_file)
+
+    # SPA 兜底：所有其他路径返回 index.html 交由 React Router 接管
     index_path = _osp.join(STATIC_DIR, "index.html")
     if _osp.exists(index_path):
         return FileResponse(index_path)

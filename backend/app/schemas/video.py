@@ -11,17 +11,17 @@ class VideoRead(BaseModel):
     id: int
     youtube_id: str
     title: str
-    uploader: Optional[str]
-    source_url: str
-    upload_date: Optional[str]
-    duration: Optional[int]
-    thumbnail_path: Optional[str]
-    file_size: Optional[int]
-    width: Optional[int]
-    height: Optional[int]
-    quality_label: Optional[str]
+    uploader: Optional[str] = None
+    source_url: str = ""
+    upload_date: Optional[str] = None
+    duration: Optional[int] = None
+    thumbnail_path: Optional[str] = None
+    file_size: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    quality_label: Optional[str] = None   # Video 模型无此列，兼容旧客户端保留
     last_position: float = 0
-    last_watched_at: Optional[datetime]
+    last_watched_at: Optional[datetime] = None
     created_at: datetime
 
     class Config:

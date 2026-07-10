@@ -60,15 +60,15 @@ class PlaylistEntryCreate(BaseModel):
     """歌单模式下，单条子视频的格式选择。"""
     youtube_id: str
     title: Optional[str] = None
-    video_format_id: str
-    audio_format_id: str
+    video_format_id: int
+    audio_format_id: int
 
 
 class DownloadCreateRequest(BaseModel):
     url: HttpUrl
     # v3.0 双 select 严格模式：单视频必填
-    video_format_id: Optional[str] = None
-    audio_format_id: Optional[str] = None
+    video_format_id: Optional[int] = None
+    audio_format_id: Optional[int] = None
     # 歌单模式：每条子视频单独选好格式
     playlist_entries: Optional[list[PlaylistEntryCreate]] = None
     overwrite: bool = False

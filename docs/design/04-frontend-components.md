@@ -2,6 +2,14 @@
 
 > 技术栈：React 18 + Vite + TypeScript + Vanilla CSS + video.js 8.x
 
+## 4.0 当前实现对照（2026-07-10）
+
+- 路由为 `/`、`/downloads`、`/watch/:id`、`/settings`，无独立历史页。
+- `AddDownloadDialog` 挂在 `DownloadTasks` 页面，不在 `VideoLibrary` 页面内触发。
+- 已实现的通用 hooks 为 `useApi`、`useSSE`；文档中的 `useTaskProgress`、`useVideos`、`useSettings` 尚未独立实现。
+- `Settings` 页当前仅提供 Cookies 管理与代理说明展示，不包含可编辑代理表单。
+- 播放页使用 `VideoJSPlayer`，但后端 `/api/videos/{id}`、`/stream`、`/progress` 仍为占位接口，端到端播放链路尚未闭环。
+
 ## 4.1 路由设计
 
 | Path | 组件 | 说明 |

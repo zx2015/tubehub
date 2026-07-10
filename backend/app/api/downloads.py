@@ -124,6 +124,13 @@ async def create_download(
     from app.services.thumbnail import download_thumbnail
 
     url_str = str(req.url)
+    logger.info(
+        f"create_download ENTERED: url={url_str} "
+        f"video_format_id={req.video_format_id!r} (type={type(req.video_format_id).__name__}), "
+        f"audio_format_id={req.audio_format_id!r} (type={type(req.audio_format_id).__name__}), "
+        f"overwrite={req.overwrite}"
+    )
+
 
     if not req.video_format_id or not req.audio_format_id:
         raise HTTPException(
@@ -134,19 +141,37 @@ async def create_download(
     # 1. 完整拉取元信息
     try:
         probe = await ScraperService.fetch_metadata(url_str)
+        logger.info(
+            f"create_download: scrape OK youtube_id={probe.get('youtube_id')} "
+            f"title={probe.get('title', '')[:50]!r} "
+            f"video_count={len(probe.get('video_formats', []))} "
+            f"audio_count={len(probe.get('audio_formats', []))}"
+        )
+
     except Exception as e:
         logger.error(f"create_download: scrape failed for {url_str}: {e}")
         raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")
 
     # 2. 校验用户选的两个 format_id 是否在 list-formats 中（严格性保障）
-    video_ids = {str(f["id"]) for f in probe.get("video_formats", [])}
-    audio_ids = {str(f["id"]) for f in probe.get("audio_formats", [])}
+    # format_id 在前端下拉中是字符串，但 request schema 已改为 int（与 model 一致）
+    video_ids = {int(f["id"]) for f in probe.get("video_formats", [])}
+    audio_ids = {int(f["id"]) for f in probe.get("audio_formats", [])}
+    logger.info(
+        f"create_download: validation V_id={req.video_format_id} "
+        f"A_id={req.audio_format_id} | valid V={sorted(video_ids)} valid A={sorted(audio_ids)}"
+    )
     if req.video_format_id not in video_ids:
+        logger.error(
+            f"create_download: video_format_id {req.video_format_id} 不在 {sorted(video_ids)}"
+        )
         raise HTTPException(
             status_code=400,
             detail=f"视频格式 ID {req.video_format_id} 不在可选列表中，请重新选择",
         )
     if req.audio_format_id not in audio_ids:
+        logger.error(
+            f"create_download: audio_format_id {req.audio_format_id} 不在 {sorted(audio_ids)}"
+        )
         raise HTTPException(
             status_code=400,
             detail=f"音频格式 ID {req.audio_format_id} 不在可选列表中，请重新选择",
@@ -154,11 +179,12 @@ async def create_download(
 
     video_id = probe.get("youtube_id")
     video_title = probe.get("title") or "Untitled"
+    best_thumbnail_url = probe.get("thumbnail")  # yt-dlp 已选出最佳质量 URL
 
-    # 3. 提前下载缩略图
+    # 3. 提前下载缩略图（优先使用 yt-dlp 的最佳 URL，其次降级链）
     if video_id:
         try:
-            await download_thumbnail(video_id)
+            await download_thumbnail(video_id, best_url=best_thumbnail_url)
         except Exception as e:
             logger.warning(f"提前下载缩略图失败 ({video_id}): {e}")
 
@@ -192,6 +218,11 @@ async def create_download(
     logger.info(
         f"Created v3.0 download task id={task.id} vid={video_id} "
         f"V={req.video_format_id} A={req.audio_format_id}"
+    )
+    logger.success(
+        f"create_download SUCCESS: task_id={task.id} vid={video_id} "
+        f"V={task.video_format_id} A={task.audio_format_id} title={video_title[:30]!r} "
+        f"url={url_str}"
     )
     return [DownloadTaskRead.model_validate(task)]
 
@@ -235,9 +266,21 @@ async def delete_download(task_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="任务不存在")
 
     if task.status in ("pending", "queued", "downloading", "merging"):
-        await cancel_running_task(task_id)
+        # 正在运行且有活跃 worker：先取消
+        from app.services.scheduler import cancel_events
+        if task_id in cancel_events:
+            ok = await cancel_running_task(task_id)
+            if not ok:
+                raise HTTPException(status_code=409, detail="任务取消失败，请稍后重试")
+        else:
+            # 失联僵尸任务（状态仍在运行态但无 worker）：允许直接删除
+            ok = await delete_download_task(task_id, allow_in_progress=True)
+            if not ok:
+                raise HTTPException(status_code=409, detail="任务删除失败，请稍后重试")
     else:
-        await delete_download_task(task_id)
+        ok = await delete_download_task(task_id)
+        if not ok:
+            raise HTTPException(status_code=409, detail="任务删除失败，请稍后重试")
     return
 
 
@@ -307,4 +350,8 @@ async def stream_progress(task_id: int, db: AsyncSession = Depends(get_db)):
 
 
 def _format_event(event: str, data: str) -> str:
-    return f"event: {event}\ndata: {data}\n\n"
+    # 注意：前端 EventSource.onmessage 只处理无名事件（无 event: 行）。
+    # 保留 event 参数便于扩展，但实际只发 data: 行，让 onmessage 直接接收。
+    if event == "error":
+        return f"data: {data}\n\n"
+    return f"data: {data}\n\n"

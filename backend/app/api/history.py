@@ -1,13 +1,10 @@
-"""/api/history 路由 (MVP 简化版)
-
-完整接口集见 docs/design/02-api-design.md §2.1
-本文件: list 完整实现；其余端点占位。
-"""
+"""/api/history 路由"""
+from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from app.deps import get_db
 from app.models import Video, PlayHistory
@@ -49,14 +46,32 @@ async def list_history(
 
 
 @router.delete("/{history_id}", status_code=204)
-async def delete_history(history_id: int):
-    """删除单条历史（占位实现）。"""
-    return {"msg": "TODO", "history_id": history_id}
+async def delete_history(history_id: int, db: AsyncSession = Depends(get_db)):
+    """删除单条历史记录。"""
+    history = await db.get(PlayHistory, history_id)
+    if not history:
+        raise HTTPException(status_code=404, detail=f"History {history_id} not found")
+    await db.delete(history)
+    await db.commit()
+    return None
 
 
 @router.post("/clear")
 async def clear_history(
     before_days: Optional[int] = Query(None, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
 ):
-    """清空历史（可带 before_days 参数；占位实现）。"""
-    return {"msg": "TODO", "before_days": before_days}
+    """清空历史记录。
+
+    - before_days 为空：清空全部
+    - before_days=N：仅清空 N 天前的记录
+    """
+    if before_days is not None:
+        cutoff = datetime.utcnow() - timedelta(days=before_days)
+        stmt = delete(PlayHistory).where(PlayHistory.last_watched_at < cutoff)
+    else:
+        stmt = delete(PlayHistory)
+
+    result = await db.execute(stmt)
+    await db.commit()
+    return {"deleted_count": result.rowcount, "before_days": before_days}

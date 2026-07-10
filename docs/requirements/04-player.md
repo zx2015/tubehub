@@ -2,6 +2,12 @@
 
 > 来源：用户需求 §4
 
+## 4.0 当前代码实现状态（2026-07-10）
+
+- 前端 `VideoPlayer` + `VideoJSPlayer` 组件与基础进度上报逻辑已存在。
+- 但后端 `GET /api/videos/{id}`、`GET /api/videos/{id}/stream`、`PATCH /api/videos/{id}/progress` 仍为占位实现。
+- 因此播放链路尚未端到端打通；本节其余内容属于目标需求而非已交付能力。
+
 ## 4.1 功能清单（强制）
 
 | 功能 | 说明 | 优先级 |

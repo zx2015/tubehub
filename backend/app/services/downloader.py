@@ -11,11 +11,11 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timedelta
+from typing import Any
 
 from app.database import AsyncSessionLocal
 from app.models import DownloadTask, Video
 from .scheduler import download_semaphore, cancel_events
-from .settings import SettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,27 @@ DATA_DIR = os.environ.get("TUBEHUB_DATA_DIR", "data/videos")
 # ---------------------------------------------------------------------------
 # yt-dlp 延迟加载：避免在导入阶段因版本问题崩溃
 # ---------------------------------------------------------------------------
+
+
+def _is_valid_netscape_cookies(file_path: str) -> bool:
+    """检查 cookies 文件是否为合法的 Netscape 格式"""
+    if not os.path.exists(file_path):
+        return False
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        # Netscape 格式：至少需要一行 #HttpOnly_ 或 domain tab 行
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("# "):
+                continue
+            # tab 分隔的 7 字段格式：domain  flag  path  secure  expiration  name  value
+            if line.startswith("#HttpOnly_") or line.startswith("# Netscape") or "\t" in line:
+                return True
+        return False
+    except Exception as e:
+        logger.warning(f"Cookie 文件读取失败 ({file_path}): {e}")
+        return False
 def _import_yt_dlp():
     """延迟导入 yt_dlp 模块，便于测试与版本兼容。"""
     import yt_dlp
@@ -55,7 +76,7 @@ def build_ydl_opts(
     return {
         "format": fmt,
         "merge_output_format": "mp4",
-        "outtmpl": f"{output_dir}/%(uploader)s/%(title)s [%(id)s].%(ext)s",
+        "outtmpl": f"{output_dir}/%(uploader).30B/%(title).80B [%(id)s].%(ext)s",
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
@@ -102,18 +123,30 @@ def make_cancellable_ydl(cancel_event: asyncio.Event):
 
 
 # ---------------------------------------------------------------------------
-# 进度 / 后处理回调（在线程池中执行，需通过 call_soon_threadsafe 调度协程）
+# Module-level main loop reference (由 worker 在主线程设置)
 # ---------------------------------------------------------------------------
-def _schedule_coro(coro):
-    """把协程安全地扔回主事件循环（hook 在子线程中运行）。"""
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        # 子线程无主循环时退化为直接关闭协程
-        coro.close()
-        return
-    loop.call_soon_threadsafe(asyncio.create_task, coro)
+MAIN_LOOP = None
 
+
+def _schedule_coro(coro):
+    """把协程安全地扔回主事件循环（hook 在子线程中运行）。
+
+    使用模块级 MAIN_LOOP 引用，而不是 asyncio.get_event_loop()，
+    因为后者在子线程中会创建新循环，导致调度永远不生效。
+    """
+    loop = MAIN_LOOP
+    if loop is None or loop.is_closed():
+        # 兜底：尝试获取当前线程的主循环（兼容老路径）
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            coro.close()
+            return
+    try:
+        asyncio.run_coroutine_threadsafe(coro, loop)
+    except RuntimeError:
+        coro.close()
+# ---------------------------------------------------------------------------
 
 def progress_callback(d: dict, task_id: int) -> None:
     """progress_hooks 回调：更新 DB + 通知 SSE"""
@@ -138,9 +171,11 @@ def progress_callback(d: dict, task_id: int) -> None:
 def postprocessor_callback(d: dict, task_id: int) -> None:
     """postprocessor_hooks 回调：跟踪合并阶段。"""
     pp = d.get("postprocessor")
-    if d["status"] == "started":
+    status = d.get("status")
+    # 仅在真正进入合并后处理器时切换为 merging，避免被其他 postprocessor 误伤
+    if status == "started" and pp == "Merger":
         _schedule_coro(update_task_status(task_id, "merging"))
-    elif d["status"] == "finished" and pp == "Merger":
+    elif status == "finished" and pp == "Merger":
         filepath = d.get("info_dict", {}).get("filepath")
         _schedule_coro(on_download_finished(task_id, filepath))
 
@@ -199,9 +234,18 @@ async def mark_task_cancelled(task_id: int) -> None:
 
 async def on_download_finished(task_id: int, filepath: str | None) -> None:
     """合并完成 → 入库 videos 表 + 写 ready。"""
+    from app.services.thumbnail import THUMBNAIL_DIR, download_thumbnail
+    import os
+
     async with AsyncSessionLocal() as db:
         task = await db.get(DownloadTask, task_id)
         if not task:
+            return
+        # 幂等保护：避免 hook 与 worker fallback 重复收尾
+        if task.status == "ready":
+            if filepath and task.save_path != filepath:
+                task.save_path = filepath
+                await db.commit()
             return
 
         # 1. 写 ready
@@ -209,8 +253,15 @@ async def on_download_finished(task_id: int, filepath: str | None) -> None:
         task.finished_at = datetime.utcnow()
         task.save_path = filepath
 
-        # 2. 写 videos（幂等按 youtube_id upsert）
+        # 2. 确定缩略图本地路径（任务创建时已预下载，直接复用）
         youtube_id = task.youtube_id
+        thumbnail_path: str | None = None
+        if youtube_id:
+            candidate = os.path.join(THUMBNAIL_DIR, f"{youtube_id}.jpg")
+            if os.path.exists(candidate):
+                thumbnail_path = candidate
+
+        # 3. 写 videos（幂等按 youtube_id upsert）
         video = None
         if youtube_id:
             from sqlalchemy import select
@@ -224,14 +275,74 @@ async def on_download_finished(task_id: int, filepath: str | None) -> None:
                 title=task.title or "Untitled",
                 source_url=task.url,
                 file_path=filepath or "",
+                thumbnail_path=thumbnail_path,
                 video_format_id=task.video_format_id,
                 audio_format_id=task.audio_format_id,
-
             )
             db.add(video)
+        else:
+            # 已存在则补全缩略图路径（覆盖重下时更新）
+            if thumbnail_path:
+                video.thumbnail_path = thumbnail_path
+            if filepath:
+                video.file_path = filepath
 
         await db.commit()
-    logger.info(f"Task {task_id} ready, filepath={filepath}")
+    logger.info(f"Task {task_id} ready, filepath={filepath}, thumbnail={thumbnail_path}")
+
+
+def _extract_output_filepath(info: Any) -> str | None:
+    """从 yt-dlp extract_info 返回值中尽力提取最终输出文件路径。"""
+    if not isinstance(info, dict):
+        return None
+
+    candidates: list[str] = []
+
+    for key in ("filepath", "_filename"):
+        value = info.get(key)
+        if isinstance(value, str) and value:
+            candidates.append(value)
+
+    requested = info.get("requested_downloads")
+    if isinstance(requested, list):
+        for item in requested:
+            if not isinstance(item, dict):
+                continue
+            for key in ("filepath", "_filename"):
+                value = item.get(key)
+                if isinstance(value, str) and value:
+                    candidates.append(value)
+
+    # 优先返回真实存在的路径
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+
+    return candidates[0] if candidates else None
+
+
+async def _finalize_after_worker_success(task_id: int, info: Any) -> None:
+    """worker 成功返回后的兜底收尾，防止 postprocessor hook 丢事件导致卡住。"""
+    filepath = _extract_output_filepath(info)
+
+    async with AsyncSessionLocal() as db:
+        task = await db.get(DownloadTask, task_id)
+        if not task:
+            return
+        # 已被 hook 收尾，直接返回
+        if task.status == "ready":
+            return
+        # 若已取消，不覆盖为 ready
+        if task.status == "cancelled":
+            return
+
+    logger.warning(
+        "Task %s finished in worker but status=%s, applying fallback finalize (filepath=%s)",
+        task_id,
+        task.status,
+        filepath,
+    )
+    await on_download_finished(task_id, filepath)
 
 
 async def handle_download_failure(task_id: int, error: str) -> None:
@@ -295,13 +406,27 @@ async def run_download_worker(task_id: int) -> None:
             await update_task_status(task_id, "downloading")
 
             # 仅拉取 cookies，代理自动由环境变量捕获
-            cookies_path = "data/cookies.txt" if os.path.exists("data/cookies.txt") else None
+            # 检查 cookies 文件格式是否合法（避免 yt-dlp 因占位符文件崩溃）
+            cookies_path = None
+            if os.path.exists("data/cookies.txt"):
+                if _is_valid_netscape_cookies("data/cookies.txt"):
+                    cookies_path = "data/cookies.txt"
+                    logger.info(f"Task {task_id}: cookies.txt 格式校验通过")
+                else:
+                    logger.warning(
+                        f"Task {task_id}: cookies.txt 文件存在但格式无效，"
+                        f"已跳过 cookies 加载（请通过 Settings 上传有效的 Netscape 格式 cookies）"
+                    )
+
 
             ydl_opts = build_ydl_opts(task, cookies_path, DATA_DIR)
             logger.info(f"Task {task_id} download config locked - Cookies: {'data/cookies.txt' if cookies_path else 'None'} (env HTTP_PROXY active)")
             CancellableYDL = make_cancellable_ydl(cancel_event)
 
             loop = asyncio.get_running_loop()
+            # 关键:把主循环引用保存到模块级变量,供子线程中的 progress_hooks 使用
+            import app.services.downloader as _dl_mod
+            _dl_mod.MAIN_LOOP = loop
 
             def _sync_download():
                 with CancellableYDL(ydl_opts) as ydl:
@@ -321,9 +446,10 @@ async def run_download_worker(task_id: int) -> None:
                     logger.info(f"Task {task_id} starting actual stream download with format: {chosen_format}")
                     return ydl.extract_info(task.url, download=True)
 
-            await loop.run_in_executor(None, _sync_download)
-            # run_in_executor 成功完成即认为已 finished；
-            # postprocessor_hook 通过 on_download_finished 完成入库
+            info_dict = await loop.run_in_executor(None, _sync_download)
+            # 正常情况下 postprocessor_hook 会把任务推到 ready。
+            # 兜底：若 hook 丢失/未触发，worker 成功返回后强制收尾，避免卡在 merging。
+            await _finalize_after_worker_success(task_id, info_dict)
         except Cancelled:
             await mark_task_cancelled(task_id)
         except Exception as e:
@@ -364,17 +490,17 @@ async def reset_task_for_manual_retry(task_id: int) -> bool:
         return True
 
 
-async def delete_download_task(task_id: int) -> bool:
+async def delete_download_task(task_id: int, allow_in_progress: bool = False) -> bool:
     """
     物理删除任务记录（被 DELETE /api/downloads/{id} 调用）：
-    - 支持删除 finished (ready/failed/cancelled) 状态的任务，清理 DB 占位
-    - 进行中 (downloading/merging/queued) 任务拒绝删除，必须先取消
+    - 默认仅删除 finished (ready/failed/cancelled) 状态
+    - 若 allow_in_progress=True，可删除失联的进行中任务（无活跃 worker 的僵尸任务）
     """
     async with AsyncSessionLocal() as db:
         task = await db.get(DownloadTask, task_id)
         if not task:
             return False
-        if task.status in ("downloading", "merging", "queued", "pending"):
+        if (not allow_in_progress) and task.status in ("downloading", "merging", "queued", "pending"):
             return False
         await db.delete(task)
         await db.commit()

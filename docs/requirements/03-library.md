@@ -2,6 +2,13 @@
 
 > 来源：用户需求 §3
 
+## 3.0 当前代码实现状态（2026-07-10）
+
+- `GET /api/videos` 已支持标题模糊搜索（`q`）与分页（`limit`/`offset`），按 `created_at DESC` 排序。
+- `DELETE /api/videos/{id}` 当前实现删除数据库记录与历史记录；物理文件删除与冲突保护仍未接入。
+- `POST /api/videos/batch-delete`、`GET /api/videos/{id}`、`/thumbnail`、`/stream`、`PATCH /progress` 目前仍为占位返回。
+- 缩略图下载服务已存在并在创建下载任务时预拉取到 `data/thumbnails/`，但视频模块的缩略图读取接口尚未落地。
+
 ## 3.1 缩略图来源分析（重要 ⚠️）
 
 ### 3.1.1 YouTube 缩略图 URL 规律
