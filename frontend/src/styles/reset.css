@@ -1222,3 +1222,30 @@ button {
   gap: 10px;
   border-top: 1px solid rgba(255,255,255,0.08);
 }
+.add-download__select {
+  background-color: #1f1f1f;
+  color: #ffffff;
+  border: 1px solid #444;
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.add-download__select:focus {
+  outline: none;
+  border-color: #ff0000;
+  background-color: #2a2a2a;
+}
+
+.add-download__select option {
+  background-color: #1f1f1f;
+  color: #ffffff;
+  padding: 6px 10px;
+}
+
+.add-download__select option:hover {
+  background-color: #2a2a2a;
+  color: #ff0000;
+}

@@ -2,11 +2,11 @@
 
 时序：
 1. POST /api/downloads/check (🔍 检测冲突)
-   - 走 ScraperService.fetch_video_formats 完整探测，返回真实 video_formats + audio_formats
+   - 走 ScraperService.fetch_metadata 完整探测，返回真实 video_formats + audio_formats
    - 同时查 DB 命中冲突
 2. POST /api/downloads
    - 接收前端双 select 提交的 video_format_id + audio_format_id
-   - 走 ScraperService.fetch_video_formats 拉取真实元数据
+   - 走 ScraperService.fetch_metadata 拉取真实元数据
    - 提前下载缩略图
    - 以 queued 状态入库（必带 video_format_id + audio_format_id）
 """
@@ -70,7 +70,7 @@ async def check_download(
     url_str = str(req.url)
 
     try:
-        probe = await ScraperService.fetch_video_formats(url_str)
+        probe = await ScraperService.fetch_metadata(url_str)
     except Exception as e:
         logger.error(f"check_download: scrape failed for {url_str}: {e}")
         raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")
@@ -133,7 +133,7 @@ async def create_download(
 
     # 1. 完整拉取元信息
     try:
-        probe = await ScraperService.fetch_video_formats(url_str)
+        probe = await ScraperService.fetch_metadata(url_str)
     except Exception as e:
         logger.error(f"create_download: scrape failed for {url_str}: {e}")
         raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")

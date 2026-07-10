@@ -17,7 +17,7 @@ class VideoFormatOption(BaseModel):
     height: Optional[int] = None
     width: Optional[int] = None
     vcodec: Optional[str] = None
-    abr: Optional[int] = None
+    abr: Optional[float] = None
     acodec: Optional[str] = None
     tbr: Optional[float] = None
     filesize: Optional[int] = None
