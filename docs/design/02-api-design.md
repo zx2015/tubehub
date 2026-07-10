@@ -6,7 +6,7 @@
 
 | 模块 | Method | Path | 用途 |
 |------|--------|------|------|
-| **下载** | POST | `/api/downloads/check` | 🔍 检测冲突 (v3.0：返回 list-formats 的 video/audio 列表) |
+| **下载** | POST | `/api/downloads/check` | 🔍 获取信息 (v3.0：返回 list-formats 的 video/audio 列表) |
 | | POST | `/api/downloads` | 创建下载任务（支持单视频/歌单批量），提交 video_format_id + audio_format_id |
 | | GET | `/api/downloads` | 列出任务（支持 status 过滤） |
 | | GET | `/api/downloads/{id}` | 任务详情 |

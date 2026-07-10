@@ -66,7 +66,7 @@ def build_ydl_opts(
         # 绕过 PO-Token 安全限制
         "extractor_args": {
             "youtube": {
-                "player_client": ["tv", "android", "web"],
+                "player_client": ["tv", "android", "web", "ios", "web_safari", "default"],
             }
         },
 
@@ -224,8 +224,9 @@ async def on_download_finished(task_id: int, filepath: str | None) -> None:
                 title=task.title or "Untitled",
                 source_url=task.url,
                 file_path=filepath or "",
-                format_type=task.format_type,
-                quality_label=task.quality,
+                video_format_id=task.video_format_id,
+                audio_format_id=task.audio_format_id,
+
             )
             db.add(video)
 
@@ -305,12 +306,10 @@ async def run_download_worker(task_id: int) -> None:
             def _sync_download():
                 with CancellableYDL(ydl_opts) as ydl:
                     # 1. 第一步：先 extract_info(download=False) 获取视频全部格式信息 (相当于 --list-formats 探针)
-                    logger.info(f"Task {task_id} pre-fetching metadata for dynamic format selection...")
-                    info = ydl.extract_info(task.url, download=False)
 
                     # 2. 第二步：根据真实的 formats 列表，优选出最贴合高度限制的最佳音视频 format id 组合
-                    chosen_format = select_dynamic_format(info, task.quality)
-                    logger.info(f"Task {task_id} dynamic format matched - Choice: {chosen_format} (Target: {task.quality})")
+                    chosen_format = f"{task.video_format_id}+{task.audio_format_id}"
+                    logger.info(f"Task {task_id} using format: {chosen_format} (V:{task.video_format_id} + A:{task.audio_format_id})")
 
                     # 动态更新 ydl_opts['format']
                     ydl.params["format"] = chosen_format

@@ -20,7 +20,7 @@
 
 ### 2.2.1 视频格式（`video_format_id`，必选）
 
-来自 `formats` 中 `vcodec != "none"` 的所有视频轨。完整字段说明：
+来自 `formats` 中 **`vcodec != "none" && acodec == "none" && vcodec != "images"`** 的所有视频轨。完整字段说明：
 
 ```json
 {
@@ -37,7 +37,7 @@
 
 ### 2.2.2 音频格式（`audio_format_id`，必选）
 
-来自 `formats` 中 `acodec != "none" && vcodec == "none"` 的所有音频轨：
+来自 `formats` 中 **`vcodec == "none" && acodec != "none"`** 的所有音频轨：
 
 ```json
 {
@@ -68,7 +68,7 @@ ydl_opts["format"] = f"{task.video_format_id}+{task.audio_format_id}"
 
 ### 2.2.4 UI 交互
 
-- 检测冲突完成后，UI 自动展开双 select 下拉框。
+- 获取信息解析成功后，UI 自动展开双 select 下拉框。
 - 视频格式 select **默认选中第一个最高分辨率的视频轨**。
 - 音频格式 select **默认选中第一个最高码率的音频轨**。
 - 用户可自由切换，最终选定的两个 id 都会在 POST /api/downloads 中显式提交给后端。

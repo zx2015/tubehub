@@ -28,7 +28,7 @@ sequenceDiagram
     participant Thumb as thumbnail.py
 
     User->>FE: 点击 [+ 新增下载] 输入 URL
-    FE->>BE: POST /api/downloads/check { url } (🔍 检测冲突按钮)
+    FE->>BE: POST /api/downloads/check { url } (🔍 获取信息按钮)
     BE->>DB: 查询 videos.youtube_id 是否已存在
     alt 视频已存在 (Conflict)
         DB-->>BE: 命中
@@ -85,14 +85,16 @@ sequenceDiagram
 
 #### 阶段 ② — 检测冲突（v3.0 重构：拉取真实 list-formats）
 - **API**：`POST /api/downloads/check`。
-- **按钮 UI 名称**：`🔍 检测冲突`。
+- **按钮 UI 名称**：`🔍 获取信息`。
 - **机制**（v3.0）：
   1. **DB 查重**：先查 `videos` 表的 `youtube_id` 字段。命中 → 返回 `conflict=true` + 已有视频信息，**前端立刻弹出"已存在"对话框，停止后续步骤**。
   2. **未命中 → 调 `ScraperService.fetch_formats(url)`**：
      - 在 `asyncio.to_thread` 中执行 `yt_dlp.YoutubeDL({"quiet": True}).extract_info(url, download=False)`。
-     - 拿到完整 `formats` 列表后，按以下两条规则过滤：
-       - **视频轨**：`vcodec != "none"`（包括 `acodec != "none"` 的 progressive 单流，但 UI 标注清楚）
-       - **音频轨**：`acodec != "none" && vcodec == "none"`
+     - 拿到完整 `formats` 列表后，**严格分类**（已脚本验证）：
+       - **视频轨**：`vcodec != "none" && acodec == "none" && vcodec != "images"`（**排除 progressive 与缩略图**）
+       - **音频轨**：`vcodec == "none" && acodec != "none"`（**确保单轨道音频**）
+       - **缩略图** (sb0-3)：`vcodec == "images"` → 丢弃
+       - **Progressive**（含 18 这种音视频混合轨）：`vcodec && acodec 都非 none` → 丢弃，避免与 + 号冲突
      - 对每个轨生成人类可读 `label`：
        - 视频轨：`"{height}p ({ext} · {vcodec} · {tbr:.0f}kbps)"`
        - 音频轨：`"{acodec} ({ext} · {abr:.0f}kbps · {asr/1000:.0f}kHz)"`
@@ -156,7 +158,7 @@ sequenceDiagram
   - 先用 `extract_info(download=False)` 获取该视频在 YouTube 的格式数组。
   - 动态过滤出当前高度限制下（例如 `<=720px`）的最佳视频轨 `best_v` 与最佳音频轨 `best_a`。
   - 拼装格式为 `"399+251"` (即 `bestvideo_id+bestaudio_id/best`)，彻底规避因静态映射导致老视频缺少画质而下载报错的崩溃。
-  - **PO-Token 绕过**：强制配置 `player_client = ["tv", "android", "web"]`（优先 TV 终端）配合您上传的 Netscape Cookies。
+  4. **PO-Token 绕过**：强制配置 `player_client = ['default', 'ios', 'android', 'tv', 'web_safari', 'web ... [HISTORICAL_ARG_TRUNCATED_LEN_388] ... ... 仅 5 个；全套必须）。配合您上传的 Netscape Cookies。
 - **落盘自愈**：音视频下载完成后，调用 FFmpeg 自动合并为 MP4，写入视频表并自愈视频 Title。
 - **缩略图**：调用 `download_thumbnail` 通过代理下载。
 
@@ -267,7 +269,7 @@ def build_ydl_opts(
         # 绕过 PO-Token 限制
         "extractor_args": {
             "youtube": {
-                "player_client": ["tv", "android", "web"],
+                "player_client": ['default', 'ios', 'android', 'tv', 'web_safari', 'web'],
             }
         },
 

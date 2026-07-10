@@ -23,7 +23,7 @@
 | Q4 | 视频文件命名 | `{uploader}/{title}[{youtube_id}].{ext}` | [03-library.md §3.3](03-library.md) |
 | Q5 | 失败重试策略 | 自动重试 3 次后置为 Failed，可手动重启 | [02-downloader.md §2.8](02-downloader.md) |
 | Q5+ | 任务并发上限 | 最多 2 个并行，超出 queued FIFO | [02-downloader.md §2.2.5](02-downloader.md) |
-| **Q25 (v3.0)** | 新增下载流程 | 「🔍 检测冲突」按钮 + 「视频格式 + 音频格式」双 select，严格按 list-formats 动态生成 | [02-downloader.md §2.2.2](02-downloader.md) |
+| **Q25 (v3.0)** | 新增下载流程 | 「🔍 获取信息」按钮 + 「视频格式 + 音频格式」双 select，严格按 list-formats 动态生成 | [02-downloader.md §2.2.2](02-downloader.md) |
 | Q6 | HLS 分片（4K/8K） | MVP 不做，记录未来路线 | [04-player.md §4.6](04-player.md) |
 | Q7 | 元数据编辑 | MVP 不做（仅展示） | [03-library.md §3.8.1](03-library.md) |
 | Q8 | 历史保留策略 | 30 天自动清理（仅 play_history） | [05-history.md §5.6](05-history.md) |

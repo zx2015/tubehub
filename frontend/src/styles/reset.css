@@ -1035,7 +1035,7 @@ button {
   background: var(--surface, #1f1f1f);
   color: var(--text, #f1f1f1);
   border-radius: 12px;
-  width: 720px;          /* 1.5x of original ~480px */
+  width: 1080px;          /* 1.5x of 720px (user steering: 再放大 1.5x) */ ~480px */
   max-width: 90vw;
   max-height: 85vh;
   overflow: hidden;

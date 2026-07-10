@@ -69,10 +69,13 @@ app.include_router(history.router)
 app.include_router(settings.router)
 
 # 静态目录（缩略图占位图、前端构建产物等）
-os.makedirs("static", exist_ok=True)
+import os.path as _osp
+STATIC_DIR = _osp.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
 
-# 根路径下挂载静态资源（html=True 让 / 直接返回 index.html）
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+# 重要：不要用 app.mount("/")，会拦截所有路径让 React Router 无法接管 SPA 路由
+# 只挂载 /assets 子目录用于前端静态资源，根路径与所有 SPA 路由都交给 spa_catchall
+if _osp.exists(_osp.join(STATIC_DIR, "assets")):
+    app.mount("/assets", StaticFiles(directory=_osp.join(STATIC_DIR, "assets")), name="static-assets")
 
 # SPA 兜底路由：所有未匹配的路径（非 /api/*）都返回前端 index.html
 # 让 React Router 在前端接管 /downloads、/settings、/watch/:id 等路径
@@ -85,7 +88,7 @@ async def spa_catchall(full_path: str):
     if full_path.startswith("api/"):
         return JSONResponse(status_code=404, content={"detail": "Not Found"})
     # 静态文件资源（assets 等）应已被 mount 命中；这里只兜底 SPA 路由
-    index_path = os.path.join("static", "index.html")
-    if os.path.exists(index_path):
+    index_path = _osp.join(STATIC_DIR, "index.html")
+    if _osp.exists(index_path):
         return FileResponse(index_path)
     return JSONResponse(status_code=404, content={"detail": "Frontend index.html not found"})
