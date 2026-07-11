@@ -83,7 +83,10 @@ def build_ydl_opts(
         "writethumbnail": False,                 # 缩略图由后端单独下载（走代理）
 
         "cookiefile": cookies_path,
-        
+
+        # 允许 deno 从 GitHub 下载 EJS challenge solver（yt-dlp 2026.07+ 需要）
+        "remote_components": ["ejs:github"],
+
         # 绕过 PO-Token 安全限制
         "extractor_args": {
             "youtube": {
