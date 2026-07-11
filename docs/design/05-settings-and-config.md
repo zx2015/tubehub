@@ -8,8 +8,18 @@
 | :--- | :--- | :--- | :--- |
 | v1.0.0 | 2026-07-07 | 初始版本：支持 Cookies 与代理配置 | Gemini CLI |
 | v2.0.0 | 2026-07-08 | **架构重构**：移除 `ytdlp_proxy` 字段及所有代理接口。代理统一切到宿主机 `.env` 环境变量 | Gemini CLI |
+| v2.1.0 | 2026-07-11 | 补充 Cookies 安全规范：严禁入库 | Copilot |
 
 ---
+
+> ⚠️ **SECURITY — Cookies 严禁提交到 Git**
+>
+> cookies.txt 包含真实 YouTube 登录凭证（`SID`、`SSID`、`LOGIN_INFO` 等），一旦提交即使删除也会留在历史记录中。
+>
+> **规范**：
+> - `*.txt`、`*_cookies.txt`、`cookies.txt` 已加入 `.gitignore`，任何 cookies 文件严禁 `git add`
+> - Cookies 仅通过 TubeHub 设置页上传，存入 `system_settings` 表（DB 不入库）和 `data/cookies.txt`（`data/` 已 ignore）
+> - 启动时自动从 DB 恢复到文件，重建容器不丢失
 
 ## 5.1 数据模型
 

@@ -36,6 +36,17 @@ logs/
 # 数据目录（视频、缩略图、数据库、Cookies）
 data/
 
+# ⚠️ SECURITY: Cookies 文件含真实登录凭证，严禁提交
+# 包括浏览器导出的 Netscape 格式 cookies 文件
+*.txt
+!requirements*.txt
+!backend/static/.gitkeep
+# 明确列举常见 cookies 文件名
+cookies.txt
+*_cookies.txt
+*.cookies.txt
+www.youtube.com_cookies.txt
+
 # 本地知识库（不纳入版本控制）
 .learnings/
 
