@@ -2,11 +2,10 @@
 
 > 来源：用户需求 §5
 
-## 5.0 当前代码实现状态（2026-07-10）
+## 5.0 当前代码实现状态（2026-07-11）
 
-- 已实现：`GET /api/history` 联表返回历史与视频信息，按 `last_watched_at DESC` 分页。
-- 未实现：`DELETE /api/history/{id}`、`POST /api/history/clear` 目前为占位返回。
-- 自动清理逻辑在服务层函数中尚未落地，`history_cleaner_loop` 仍为占位循环。
+- 已实现：`GET /api/history`、`DELETE /api/history/{id}`、`POST /api/history/clear`（支持 `before_days` 参数）。
+- `history_cleaner_loop` 已实现，每小时清理 30 天前的历史记录。
 
 ## 5.1 核心要求
 

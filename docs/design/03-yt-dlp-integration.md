@@ -9,16 +9,22 @@
 | v1.0.0 | 2026-07-07 | 初始集成设计 | Gemini CLI |
 | v1.1.0 | 2026-07-07 | 追加动态格式、cookies、代理配置与端到端下载流程说明 | Gemini CLI |
 | v1.1.1 | 2026-07-10 | 按当前代码修正：单视频流程、格式过滤策略、清理任务状态 | Copilot |
+| v1.2.0 | 2026-07-11 | ScraperService 自动读取 cookies；格式过滤 fallback；deno JS 运行时 | Copilot |
 
 ---
 
-## 3.x 当前实现对照（2026-07-10）
+## 3.x 当前实现对照（2026-07-11）
 
 1. `POST /api/downloads` 当前实现为**单视频任务**，未实现歌单拆解入队。
-2. `ScraperService` 只保留浏览器兼容轨道：视频 `mp4 + avc1`、音频 `m4a + mp4a`，并过滤 progressive 与缩略图轨道。
-3. worker 下载阶段直接使用已入库的 `video_format_id+audio_format_id`，未再执行“运行时动态二次优选”。
-4. 缩略图下载由 `httpx.AsyncClient` 依赖环境变量代理，函数签名中无显式 `proxy_url` 参数。
-5. `task_cleaner_loop` / `history_cleaner_loop` 目前是占位循环，尚未落地数据库清理逻辑。
+2. **ScraperService 自动读取 cookies**：`_get_cookies_path()` 自动检测 `data/cookies.txt` 有效性（验证 Netscape 格式），有效则传给 yt-dlp `cookiefile` 参数，解决 Bot 检测问题。
+3. **格式过滤双层策略**：
+   - 严格层：优先只保留 `mp4+avc1`（视频）/ `m4a+mp4a`（音频），浏览器 100% 兼容。
+   - Fallback 层：严格过滤返回空时，自动降级为所有纯视频/纯音频轨（排除 progressive）。
+4. worker 下载阶段直接使用已入库的 `video_format_id+audio_format_id`，未再执行运行时二次优选。
+5. 缩略图下载由 `httpx.AsyncClient` 依赖 `HTTP_PROXY` 环境变量，无需手动传参。
+6. `task_cleaner_loop` / `history_cleaner_loop` **已实现**（Ready 3天 / Failed 30天 / History 30天）。
+7. **deno JS 运行时**：yt-dlp 2026.07+ 需要 deno 处理某些受限视频，已在 Dockerfile 安装。
+8. **路径对齐**：`_resolve_path` 改用 `os.path.abspath()`，以 CWD=`/app` 为基准，与 volume 挂载一致。
 
 ## 3.0 端到端下载处理流程
 

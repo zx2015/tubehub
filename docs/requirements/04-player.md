@@ -2,11 +2,11 @@
 
 > 来源：用户需求 §4
 
-## 4.0 当前代码实现状态（2026-07-10）
+## 4.0 当前代码实现状态（2026-07-11）
 
-- 前端 `VideoPlayer` + `VideoJSPlayer` 组件与基础进度上报逻辑已存在。
-- 但后端 `GET /api/videos/{id}`、`GET /api/videos/{id}/stream`、`PATCH /api/videos/{id}/progress` 仍为占位实现。
-- 因此播放链路尚未端到端打通；本节其余内容属于目标需求而非已交付能力。
+- 前端 `VideoPlayer` + `VideoJSPlayer` + 进度上报已全部实现。
+- 后端 `GET /api/videos/{id}`、`GET /api/videos/{id}/stream`（Range 分片）、`PATCH /api/videos/{id}/progress` 均已实现。
+- 播放链路端到端打通：进度记忆（upsert PlayHistory）、≥95% 自动标记完成均正常工作。
 
 ## 4.1 功能清单（强制）
 

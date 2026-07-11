@@ -2,31 +2,31 @@
 
 > 后端 FastAPI 路由 + Pydantic Schema 设计。基于需求 02/03/05/06/07 已确认的接口集。
 
-## 2.1 RESTful 路由总表（按当前代码）
+## 2.1 RESTful 路由总表（2026-07-11 全部已实现）
 
-| 模块 | Method | Path | 用途 | 当前状态 |
+| 模块 | Method | Path | 用途 | 状态 |
 |------|--------|------|------|------|
-| **下载** | POST | `/api/downloads/check` | 获取信息，返回 `video_formats` / `audio_formats` | ✅ 已实现 |
-| | POST | `/api/downloads` | 创建任务（单视频） | ✅ 已实现 |
-| | GET | `/api/downloads` | 列出任务（支持 `status`） | ✅ 已实现 |
-| | GET | `/api/downloads/{id}` | 任务详情 | ✅ 已实现 |
-| | DELETE | `/api/downloads/{id}` | 进行中任务取消；终态任务删除 | ✅ 已实现 |
-| | POST | `/api/downloads/{id}/retry` | 手动重试 failed/cancelled | ✅ 已实现 |
-| | GET | `/api/downloads/{id}/stream` | SSE 进度流 | ✅ 已实现 |
-| **视频** | GET | `/api/videos` | 视频库列表（`q` / `limit` / `offset`） | ✅ 已实现 |
-| | GET | `/api/videos/{id}` | 视频详情 | ⚠️ 占位返回 |
-| | DELETE | `/api/videos/{id}` | 删除视频记录 + 历史记录 | ✅ 已实现（未做物理文件删除） |
-| | POST | `/api/videos/batch-delete` | 批量删除 | ⚠️ 占位返回 |
-| | GET | `/api/videos/{id}/thumbnail` | 缩略图 | ⚠️ 占位返回 |
-| | GET | `/api/videos/{id}/stream` | 视频流 | ⚠️ 占位返回 |
-| | PATCH | `/api/videos/{id}/progress` | 播放进度上报 | ⚠️ 占位返回 |
-| **历史** | GET | `/api/history` | 列出历史 | ✅ 已实现 |
-| | DELETE | `/api/history/{id}` | 删除单条历史 | ⚠️ 占位返回 |
-| | POST | `/api/history/clear` | 清空历史 | ⚠️ 占位返回 |
-| **设置** | GET | `/api/settings/cookies` | 获取 Cookie 状态 | ✅ 已实现 |
-| | POST | `/api/settings/cookies` | 上传 Cookie（`text/plain`） | ✅ 已实现 |
-| | DELETE | `/api/settings/cookies` | 清除 Cookie | ✅ 已实现 |
-| **运维** | GET | `/api/health` | 健康检查 | ✅ 已实现 |
+| **下载** | POST | `/api/downloads/check` | 获取信息，返回 `video_formats` / `audio_formats` | ✅ |
+| | POST | `/api/downloads` | 创建任务（单视频，双 format_id 严格模式） | ✅ |
+| | GET | `/api/downloads` | 列出任务（支持 `status` 过滤） | ✅ |
+| | GET | `/api/downloads/{id}` | 任务详情 | ✅ |
+| | DELETE | `/api/downloads/{id}` | 进行中→取消；终态→物理删除；僵尸→直接删除 | ✅ |
+| | POST | `/api/downloads/{id}/retry` | 手动重试 failed/cancelled | ✅ |
+| | GET | `/api/downloads/{id}/stream` | SSE 进度流（1Hz 轮询，最长 1 小时） | ✅ |
+| **视频** | GET | `/api/videos` | 视频库列表（`q` 模糊搜索 / `limit` / `offset`） | ✅ |
+| | GET | `/api/videos/{id}` | 视频详情 + last_position 回填 | ✅ |
+| | DELETE | `/api/videos/{id}` | 删除视频（物理文件 + DB + CASCADE 历史） | ✅ |
+| | POST | `/api/videos/batch-delete` | 批量删除 | ✅ |
+| | GET | `/api/videos/{id}/thumbnail` | 缩略图（DB路径→youtube_id→占位图） | ✅ |
+| | GET | `/api/videos/{id}/stream` | Range 分片流（206 Partial Content） | ✅ |
+| | PATCH | `/api/videos/{id}/progress` | 进度上报（upsert PlayHistory，≥95% 标记 completed） | ✅ |
+| **历史** | GET | `/api/history` | 列出历史（联表，按 last_watched_at 倒序） | ✅ |
+| | DELETE | `/api/history/{id}` | 删除单条历史 | ✅ |
+| | POST | `/api/history/clear` | 清空历史（可带 `before_days`） | ✅ |
+| **设置** | GET | `/api/settings/cookies` | 获取 Cookie 状态（不返回内容） | ✅ |
+| | POST | `/api/settings/cookies` | 上传 Cookie（`text/plain`，存 DB + 落盘） | ✅ |
+| | DELETE | `/api/settings/cookies` | 清除 Cookie | ✅ |
+| **运维** | GET | `/api/health` | 健康检查（DB/FFmpeg/磁盘空间） | ✅ |
 
 ## 2.2 Pydantic Schema 设计
 

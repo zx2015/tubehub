@@ -2,12 +2,13 @@
 
 > 来源：用户需求 §3
 
-## 3.0 当前代码实现状态（2026-07-10）
+## 3.0 当前代码实现状态（2026-07-11）
 
-- `GET /api/videos` 已支持标题模糊搜索（`q`）与分页（`limit`/`offset`），按 `created_at DESC` 排序。
-- `DELETE /api/videos/{id}` 当前实现删除数据库记录与历史记录；物理文件删除与冲突保护仍未接入。
-- `POST /api/videos/batch-delete`、`GET /api/videos/{id}`、`/thumbnail`、`/stream`、`PATCH /progress` 目前仍为占位返回。
-- 缩略图下载服务已存在并在创建下载任务时预拉取到 `data/thumbnails/`，但视频模块的缩略图读取接口尚未落地。
+- `GET /api/videos`、`GET /api/videos/{id}`、`DELETE /api/videos/{id}`（含物理文件删除）、`POST /api/videos/batch-delete` 均已实现。
+- `GET /api/videos/{id}/stream`：HTTP Range 分片流，支持拖拽进度条。
+- `PATCH /api/videos/{id}/progress`：upsert PlayHistory，≥95% 自动标记 completed。
+- `GET /api/videos/{id}/thumbnail`：优先读 DB 记录路径，自动 fallback youtube_id 查找，再 fallback 占位图。
+- 缩略图在创建下载任务时预拉取，下载完成入库时写入 `thumbnail_path`。路径解析改用 `os.path.abspath()` 对齐 CWD=`/app`。
 
 ## 3.1 缩略图来源分析（重要 ⚠️）
 

@@ -2,12 +2,13 @@
 
 > 来源：用户需求 §1, §6, §7
 
-## 7.0 当前代码实现状态（2026-07-10）
+## 7.0 当前代码实现状态（2026-07-11）
 
 - 调度模型为 `asyncio.create_task + Semaphore(2)`，非 `BackgroundTasks`。
-- `backend/app` 当前以单文件模型组织（`models/__init__.py`），并无拆分的 `video.py` / `download_task.py` / `play_history.py`。
-- 已注册路由：`health`、`downloads`、`videos`、`history`、`settings`；其中 videos/history 含多个占位端点。
-- 设置模块当前仅提供 Cookies 管理接口，代理改为环境变量透传，不再提供 proxy CRUD API。
+- `backend/app/models/__init__.py` 单文件包含所有 ORM 模型；DB schema 已迁移，移除旧字段 `format_type`/`quality`。
+- 所有 API 路由均已完整实现，无占位端点。
+- 设置模块提供 Cookies 管理（GET/POST/DELETE），代理通过 `.env` 环境变量注入，无 proxy CRUD API。
+- 代理地址：`10.158.100.9:8080`；宿主机 shell 环境变量优先级高于 `.env`，部署时需显式传递。
 
 ## 7.1 技术栈
 

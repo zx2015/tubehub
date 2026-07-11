@@ -9,6 +9,7 @@
 | v1.0.0 | 2026-07-07 | 初始版本 | Gemini CLI |
 | v2.0.0 | 2026-07-08 | 新增"容器自愈启动入口"机制（git pull + pip upgrade on boot） | Gemini CLI |
 | v2.0.1 | 2026-07-10 | 按当前代码修正 entrypoint 与部署行为说明 | Copilot |
+| v2.1.0 | 2026-07-11 | entrypoint CWD 改为 /app + --app-dir；deno 安装；HDD 数据目录迁移 | Copilot |
 
 ## 7.1 启动顺序
 
@@ -17,9 +18,11 @@
 `backend/app/entrypoint.sh` 是 Docker 容器的统一启动入口。
 
 **当前能力**：
-1. 切换目录到 `/app/backend`
+1. 切换工作目录到 `/app`（与 volume 挂载点 `/app/data`、`/app/logs` 对齐）
 2. 设置 `PYTHONPATH=/app/backend`
-3. 以 `uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1` 启动
+3. 以 `uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --app-dir /app/backend` 启动
+
+> ⚠️ **关键**：CWD 必须是 `/app` 而非 `/app/backend`，否则 `data/` 相对路径解析为 `/app/backend/data/`，与 volume 挂载的 `/app/data` 不一致，导致 DB/视频/缩略图写到容器内部、重建后丢失。
 
 **执行时序**：
 ```mermaid
@@ -30,22 +33,23 @@ sequenceDiagram
     participant UV as Uvicorn
 
     DC->>E: docker compose up (启动容器)
-    E->>E: cd /app/backend
+    E->>E: cd /app  (CWD 对齐 volume 挂载点)
     E->>E: export PYTHONPATH=/app/backend
-    E->>UV: exec uvicorn app.main:app --workers 1
+    E->>UV: exec uvicorn app.main:app --workers 1 --app-dir /app/backend
     UV-->>DC: 监听 0.0.0.0:8000
 ```
 
 **操作员日常工作流**：
 ```bash
-# 本地有代码更新
-git add -A && git commit -m "..." && git push origin main
-
-# 远程仅需重启容器即可一键升级
-ssh tcagent-z15 "cd /home/tubehub/repo && docker compose restart tubehub"
+# 推送代码后，远程重新构建并启动
+ssh tcagent-z15 "cd /home/tubehub/repo && git pull && \
+  HTTP_PROXY=http://10.158.100.9:8080 HTTPS_PROXY=http://10.158.100.9:8080 \
+  docker compose build && \
+  HTTP_PROXY=http://10.158.100.9:8080 HTTPS_PROXY=http://10.158.100.9:8080 \
+  docker compose up -d"
 ```
 
-代码更新与依赖升级需通过重新构建镜像完成，启动脚本本身不执行 git/pip 自愈动作。
+> ⚠️ **代理注意**：宿主机 shell 环境变量优先级高于 `.env` 文件。若宿主机 shell 中已设置旧代理，必须在 `docker compose` 命令前显式覆盖。
 
 ### 7.1.1 本地 venv 启动
 
@@ -182,32 +186,55 @@ tar -xzf tubehub-backup-20260707.tar.gz
 docker-compose up -d
 ```
 
-## 7.5 Docker Compose
+## 7.5 Docker Compose（当前实际配置）
 
 > 文件位置：`docker-compose.yml` + `Dockerfile`
 
 ```yaml
-version: "3.9"
-
 services:
   tubehub:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+      args:
+        - HTTP_PROXY=${HTTP_PROXY:-}
+        - HTTPS_PROXY=${HTTPS_PROXY:-}
+    image: tubehub:latest
     container_name: tubehub
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
+      # 数据挂载到 HDD（/home 在 /dev/sda1）
+      - /home/tubehub/data:/app/data
+      - /home/tubehub/logs:/app/logs
     environment:
-      - SECRET_KEY=${SECRET_KEY:?required}
-      - DATABASE_URL=sqlite+aiosqlite:///./data/tubehub.db
-      - DATA_DIR=/app/data
+      - PYTHONPATH=/app/backend
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=localhost,127.0.0.1
+      - SECRET_KEY=${SECRET_KEY:-tubehub-change-me-in-production}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 45s
+```
+
+### 宿主机目录结构（tcagent-z15）
+
+```
+/home/tubehub/
+├── data/               ← 挂载到容器 /app/data（HDD /dev/sda1, 644G 可用）
+│   ├── tubehub.db      ← SQLite 数据库
+│   ├── cookies.txt     ← YouTube Netscape cookies
+│   ├── videos/         ← 下载的视频文件
+│   ├── thumbnails/     ← 缩略图缓存
+│   └── temp/           ← 临时文件
+├── logs/               ← 挂载到容器 /app/logs
+└── repo/               ← 代码仓库（不存数据）
 ```
 
 ## 7.6 升级流程

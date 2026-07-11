@@ -2,13 +2,17 @@
 
 > 技术栈：React 18 + Vite + TypeScript + Vanilla CSS + video.js 8.x
 
-## 4.0 当前实现对照（2026-07-10）
+## 4.0 当前实现对照（2026-07-11）
 
 - 路由为 `/`、`/downloads`、`/watch/:id`、`/settings`，无独立历史页。
-- `AddDownloadDialog` 挂在 `DownloadTasks` 页面，不在 `VideoLibrary` 页面内触发。
-- 已实现的通用 hooks 为 `useApi`、`useSSE`；文档中的 `useTaskProgress`、`useVideos`、`useSettings` 尚未独立实现。
-- `Settings` 页当前仅提供 Cookies 管理与代理说明展示，不包含可编辑代理表单。
-- 播放页使用 `VideoJSPlayer`，但后端 `/api/videos/{id}`、`/stream`、`/progress` 仍为占位接口，端到端播放链路尚未闭环。
+- `AddDownloadDialog` 挂在 `DownloadTasks` 页面，已修复三处 Bug：
+  - `checkedUrl`：检查时锁定 URL，提交使用锁定值（防止输入框清空后提交空 URL 400）
+  - `conflict` 字段：与后端 `DownloadCheckResponse` 字段对齐（旧代码用 `exists`）
+  - `onCreated`：后端返回 `list`，正确取 `data[0].id`
+- `Settings` 页已实现：Cookies 状态展示 + **文件上传（点击/拖拽 .txt）** + 文本粘贴两种方式 + 代理说明。
+- 侧边栏支持折叠/展开（汉堡按钮，状态 `localStorage` 持久化，带 CSS 过渡动画）。
+- 播放链路已端到端打通：`/api/videos/{id}` 元数据、`/stream` Range 分片、`/progress` 进度记忆全部实现。
+- `useSSE` 同时监听具名 `progress` 事件和无名 `message` 事件，兼容两种 SSE 格式。
 
 ## 4.1 路由设计
 

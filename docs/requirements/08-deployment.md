@@ -7,14 +7,17 @@
 | 版本号 | 日期 | 变更说明 | 作者 |
 | :--- | :--- | :--- | :--- |
 | v1.0.0 | 2026-07-07 | 初始版本 | Gemini CLI |
-| v2.0.0 | 2026-07-08 | **架构性升级**：(1) 引入 `entrypoint.sh` 自愈启动（git pull + pip upgrade on boot）；(2) `.env` 统一全局代理 `HTTP_PROXY`（替代前端/后端代理设置） | Gemini CLI |
-| v2.0.1 | 2026-07-10 | 按当前代码修正：entrypoint 为直接启动 Uvicorn，不含 git/pip 自愈流程 | Copilot |
+| v2.0.0 | 2026-07-08 | **架构性升级**：entrypoint.sh 自愈启动；`.env` 统一全局代理 | Gemini CLI |
+| v2.0.1 | 2026-07-10 | 修正：entrypoint 为直接启动 Uvicorn，不含 git/pip 自愈流程 | Copilot |
+| v2.1.0 | 2026-07-11 | entrypoint CWD 改为 /app；数据目录迁移到 HDD；deno 安装；代理覆盖说明 | Copilot |
 
-## 8.0 当前代码实现状态（2026-07-10）
+## 8.0 当前代码实现状态（2026-07-11）
 
-- 当前 `entrypoint.sh` 仅执行 `cd /app/backend`、设置 `PYTHONPATH` 并启动 Uvicorn。
-- Dockerfile 中代理参数已硬编码在构建阶段命令；运行时环境变量由 compose 注入。
-- `frontend/package.json` 未提供 `npm test` 脚本，前端校验以 `npm run build` / `npm run lint` 为主。
+- `entrypoint.sh` CWD 为 `/app`，`data/` 相对路径正确映射到 volume 挂载点 `/app/data`。
+- Dockerfile 已安装 `deno`（yt-dlp 2026.07+ 的 JS 运行时依赖）。
+- 数据目录已迁移至 HDD：宿主机 `/home/tubehub/data` → 容器 `/app/data`（644G 可用）。
+- 代理地址为 `10.158.100.9:8080`；宿主机 shell 环境变量优先级高于 `.env`，需显式传递。
+- DB schema 已迁移：移除旧字段 `format_type`、`quality`，保留 `video_format_id`/`audio_format_id`。
 
 ## 8.1 本地开发模式（venv）
 
