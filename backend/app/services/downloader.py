@@ -80,25 +80,21 @@ def build_ydl_opts(
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "writethumbnail": False,                 # 缩略图由后端单独下载（走代理）
+        "writethumbnail": False,
 
         "cookiefile": cookies_path,
 
-        # 允许 deno 从 GitHub 下载 EJS challenge solver（yt-dlp 2026.07+ 需要）
+        # 允许 deno 从 GitHub 下载 EJS challenge solver
         "remote_components": ["ejs:github"],
 
-        # 跳过 403 分片并重试，YouTube CDN 分片 URL 有时效性，中途可能 403
+        # 增强容错：分片 403 时重试，不因单片失败中断整个下载
         "skip_unavailable_fragments": True,
-        "retries": 10,                           # 整体重试（默认 3）
-        "fragment_retries": 10,                  # 单个分片重试（默认 10）
-        "file_access_retries": 5,                # 文件访问重试
+        "retries": 10,
+        "fragment_retries": 10,
+        "file_access_retries": 5,
 
-        # 只使用 tv/web 客户端（ios/android 因缺少 GVS PO Token 会 403）
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["tv", "web", "default"],
-            }
-        },
+        # 不限制 player_client，让 yt-dlp 自动选最优客户端
+        # （android_vr 不需要 n-challenge/EJS，通常最稳定）
 
         # 钩子：进度 + 后处理
         "progress_hooks": [lambda d: progress_callback(d, task.id)],

@@ -9,8 +9,9 @@ logger = logging.getLogger(__name__)
 
 _YDL_PROXY_BLOCK = {
     "youtube": {
-        # 只使用 tv/web/default（ios/android 缺少 GVS PO Token 会 403）
-        "player_client": ["tv", "web", "default"],
+        # 不限制 player_client，让 yt-dlp 自动选择
+        # android_vr 无需 n-challenge，最稳定；有 cookies 时会优先用认证 client
+        "player_client": ["android_vr", "tv", "web", "default"],
     }
 }
 
