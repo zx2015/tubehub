@@ -1242,10 +1242,13 @@ button {
 }
 
 .add-download__checkbox {
-  width: 16px;
-  height: 16px;
-  margin: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
   cursor: pointer;
+  font-size: 12px;
+  color: var(--fg-secondary);
 }
 
 .add-download__notice {
