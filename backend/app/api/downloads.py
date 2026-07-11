@@ -14,7 +14,7 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -307,12 +307,17 @@ async def retry_download(task_id: int, db: AsyncSession = Depends(get_db)):
 # GET /api/downloads/{id}/stream  SSE 实时进度推送
 # ----------------------------------------------------------------------
 @router.get("/{task_id}/stream")
-async def stream_progress(task_id: int, db: AsyncSession = Depends(get_db)):
-    """SSE 实时推送：每秒轮询任务状态/进度。"""
+async def stream_progress(task_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """SSE 实时推送：每秒轮询任务状态/进度。
+
+    - 监听 request.is_disconnected() 及时退出，防止协程泄漏
+    - 每 15s 发送 keepalive 心跳，防止 Nginx 等反向代理超时断流
+    """
     from app.database import AsyncSessionLocal
     from app.models import DownloadTask as DT
 
     TERMINAL_STATUS = {"ready", "failed", "cancelled", "deleted"}
+    KEEPALIVE_INTERVAL = 15  # 每 15 秒发一次心跳
 
     async def event_generator():
         # 立即推送首帧
@@ -320,13 +325,27 @@ async def stream_progress(task_id: int, db: AsyncSession = Depends(get_db)):
             task = await session.get(DT, task_id)
             if task:
                 yield _format_event("progress", DownloadTaskRead.model_validate(task).model_dump_json())
+                if task.status in TERMINAL_STATUS:
+                    return
             else:
                 yield _format_event("error", '{"detail":"任务不存在"}')
                 return
 
-        # 1Hz 轮询
-        for _ in range(60 * 60):  # 最多 1 小时
+        ticks_since_keepalive = 0
+        # 最多 1 小时，每秒检测一次
+        for _ in range(60 * 60):
+            # 客户端断开检测：及时退出，防止协程泄漏
+            if await request.is_disconnected():
+                return
+
             await asyncio.sleep(1)
+            ticks_since_keepalive += 1
+
+            # keepalive 心跳（注释行，SSE 规范支持，不触发 onmessage）
+            if ticks_since_keepalive >= KEEPALIVE_INTERVAL:
+                yield ": keepalive\n\n"
+                ticks_since_keepalive = 0
+
             async with AsyncSessionLocal() as session:
                 task = await session.get(DT, task_id)
                 if not task:
