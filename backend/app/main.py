@@ -13,11 +13,47 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .api import health, downloads, videos, history, settings
-from .database import init_db
+from .database import init_db, AsyncSessionLocal
+from .models import SystemSetting
 from .services.scheduler import scheduler_loop
 from .services.cleaner import task_cleaner_loop
 from .utils.logger import logger
 from .middleware import register_exception_handlers
+
+
+async def _restore_cookies_from_db() -> None:
+    """启动时将 DB 中保存的 cookies 同步到本地文件。
+
+    场景：容器重建后本地 cookies.txt 丢失或为旧版本，DB 里仍有最新备份。
+    策略：若 DB 有记录且比文件内容更新（或文件不存在），以 DB 为准覆盖。
+    """
+    cookies_path = "data/cookies.txt"
+    try:
+        async with AsyncSessionLocal() as db:
+            setting = await db.get(SystemSetting, "ytdlp_cookies")
+            if not setting or not setting.value.strip():
+                return  # DB 无记录，无需同步
+
+        db_content = setting.value
+        # 读取现有文件内容
+        file_content = ""
+        if os.path.exists(cookies_path):
+            with open(cookies_path, "r", encoding="utf-8") as f:
+                file_content = f.read()
+
+        # 文件内容与 DB 不一致时，以 DB 为准覆盖
+        if file_content != db_content:
+            os.makedirs("data", exist_ok=True)
+            with open(cookies_path, "w", encoding="utf-8") as f:
+                f.write(db_content)
+            logger.info(
+                "cookies.txt restored from DB (%d bytes, was %d bytes)",
+                len(db_content), len(file_content),
+            )
+        else:
+            logger.debug("cookies.txt is up-to-date with DB")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to restore cookies from DB: %s", e)
 
 
 @asynccontextmanager
@@ -27,6 +63,9 @@ async def lifespan(app: FastAPI):
     for d in ("data/thumbnails", "data/videos", "logs", "static"):
         os.makedirs(d, exist_ok=True)
     logger.info("TubeHub initialized (db, dirs ready)")
+
+    # 启动时从 DB 恢复 cookies 文件（防止容器重建后文件丢失）
+    await _restore_cookies_from_db()
 
     # 如果是测试环境，不启动真实的后台循环
     if os.getenv("TUBEHUB_ENV") == "test":
