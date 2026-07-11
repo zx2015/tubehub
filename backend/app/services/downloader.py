@@ -412,18 +412,13 @@ async def run_download_worker(task_id: int) -> None:
 
             await update_task_status(task_id, "downloading")
 
-            # 仅拉取 cookies，代理自动由环境变量捕获
-            # 检查 cookies 文件格式是否合法（避免 yt-dlp 因占位符文件崩溃）
-            cookies_path = None
-            if os.path.exists("data/cookies.txt"):
-                if _is_valid_netscape_cookies("data/cookies.txt"):
-                    cookies_path = "data/cookies.txt"
-                    logger.info(f"Task {task_id}: cookies.txt 格式校验通过")
-                else:
-                    logger.warning(
-                        f"Task {task_id}: cookies.txt 文件存在但格式无效，"
-                        f"已跳过 cookies 加载（请通过 Settings 上传有效的 Netscape 格式 cookies）"
-                    )
+            # 从 DB 读取 cookies 到临时文件（防止被 yt-dlp 覆写磁盘文件）
+            import sys as _sys; _sys.path.insert(0, '/app/backend')
+            from app.services.scraper import _get_cookies_path
+            cookies_path = _get_cookies_path()
+            logger.info(
+                f"Task {task_id}: cookies={'tmp file from DB' if cookies_path else 'None'}"
+            )
 
 
             ydl_opts = build_ydl_opts(task, cookies_path, DATA_DIR)

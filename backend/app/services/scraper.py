@@ -37,7 +37,31 @@ def _base_opts(skip_download: bool = True, cookies_path: str | None = None) -> d
 
 
 def _get_cookies_path() -> str | None:
-    """从标准位置读取 cookies 文件路径，自动验证有效性。"""
+    """从 DB 实时读取 cookies 写到临时只读文件，防止 yt-dlp 覆写磁盘文件。"""
+    import sqlite3, tempfile
+
+    db_path = "data/tubehub.db"
+    if os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path)
+            row = conn.execute(
+                "SELECT value FROM system_settings WHERE key='ytdlp_cookies'"
+            ).fetchone()
+            conn.close()
+            if row and row[0].strip():
+                content = row[0]
+                # 写到临时只读文件，yt-dlp 无法覆写
+                tmp = tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".txt", delete=False, encoding="utf-8"
+                )
+                tmp.write(content)
+                tmp.close()
+                os.chmod(tmp.name, 0o444)
+                return tmp.name
+        except Exception as e:
+            logger.warning("Failed to load cookies from DB: %s", e)
+
+    # 兜底：从磁盘文件读取
     candidate = "data/cookies.txt"
     if not os.path.exists(candidate):
         return None
