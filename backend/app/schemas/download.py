@@ -66,10 +66,9 @@ class PlaylistEntryCreate(BaseModel):
 
 class DownloadCreateRequest(BaseModel):
     url: HttpUrl
-    # v3.0 双 select 严格模式：单视频必填
-    video_format_id: Optional[int] = None
-    audio_format_id: Optional[int] = None
-    # 歌单模式：每条子视频单独选好格式
+    # v3.0 双 select 严格模式：format_id 为字符串（yt-dlp 可返回非纯数字 ID 如 "140-drc"）
+    video_format_id: Optional[str] = None
+    audio_format_id: Optional[str] = None
     playlist_entries: Optional[list[PlaylistEntryCreate]] = None
     overwrite: bool = False
 
@@ -82,8 +81,8 @@ class DownloadTaskRead(BaseModel):
     url: str
     youtube_id: Optional[str] = None
     title: Optional[str] = None
-    video_format_id: Optional[int] = None
-    audio_format_id: Optional[int] = None
+    video_format_id: Optional[str] = None
+    audio_format_id: Optional[str] = None
     status: str
     progress: float
     speed: Optional[str] = None

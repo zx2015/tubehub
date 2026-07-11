@@ -60,9 +60,9 @@ class DownloadTask(Base):
     url = Column(Text, nullable=False)
     youtube_id = Column(String(16), index=True)
     title = Column(String(512))
-    # v3.0 双 format_id 必填（由前端 select 提交）
-    video_format_id = Column(Integer, nullable=False)
-    audio_format_id = Column(Integer, nullable=False)
+    # v3.0 双 format_id 必填（由前端 select 提交，yt-dlp format_id 可含非数字如 "140-drc"）
+    video_format_id = Column(String(32), nullable=False, default="")
+    audio_format_id = Column(String(32), nullable=False, default="")
 
     status = Column(String(16), nullable=False, default="pending", index=True)
     progress = Column(Float, default=0)

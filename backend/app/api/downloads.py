@@ -152,15 +152,14 @@ async def create_download(
         logger.error(f"create_download: scrape failed for {url_str}: {e}")
         raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")
 
-    # 2. 校验用户选的两个 format_id 是否在 list-formats 中（严格性保障）
-    # format_id 在前端下拉中是字符串，但 request schema 已改为 int（与 model 一致）
-    video_ids = {int(f["id"]) for f in probe.get("video_formats", [])}
-    audio_ids = {int(f["id"]) for f in probe.get("audio_formats", [])}
+    # 2. 校验用户选的两个 format_id 是否在 list-formats 中（字符串比较，兼容 "140-drc" 等非纯数字 ID）
+    video_ids = {str(f["id"]) for f in probe.get("video_formats", [])}
+    audio_ids = {str(f["id"]) for f in probe.get("audio_formats", [])}
     logger.info(
-        f"create_download: validation V_id={req.video_format_id} "
-        f"A_id={req.audio_format_id} | valid V={sorted(video_ids)} valid A={sorted(audio_ids)}"
+        f"create_download: validation V_id={req.video_format_id!r} "
+        f"A_id={req.audio_format_id!r} | valid V={sorted(video_ids)} valid A={sorted(audio_ids)}"
     )
-    if req.video_format_id not in video_ids:
+    if str(req.video_format_id) not in video_ids:
         logger.error(
             f"create_download: video_format_id {req.video_format_id} 不在 {sorted(video_ids)}"
         )
@@ -168,7 +167,7 @@ async def create_download(
             status_code=400,
             detail=f"视频格式 ID {req.video_format_id} 不在可选列表中，请重新选择",
         )
-    if req.audio_format_id not in audio_ids:
+    if str(req.audio_format_id) not in audio_ids:
         logger.error(
             f"create_download: audio_format_id {req.audio_format_id} 不在 {sorted(audio_ids)}"
         )
@@ -204,8 +203,8 @@ async def create_download(
         url=url_str,
         youtube_id=video_id,
         title=video_title,
-        video_format_id=int(req.video_format_id),
-        audio_format_id=int(req.audio_format_id),
+        video_format_id=str(req.video_format_id),
+        audio_format_id=str(req.audio_format_id),
         status="queued",
         progress=0.0,
         retry_count=0,
