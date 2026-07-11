@@ -28,6 +28,8 @@ def _base_opts(skip_download: bool = True, cookies_path: str | None = None) -> d
         # 允许 deno 从 GitHub 下载 EJS challenge solver 脚本
         # yt-dlp 2026.07+ 处理受限视频需要此脚本解决 n-challenge
         "remote_components": ["ejs:github"],
+        # 禁止 yt-dlp 更新/覆写 cookies 文件，防止覆盖用户上传的有效 cookies
+        "no_cookies_update": True,
     }
     if cookies_path and os.path.exists(cookies_path):
         opts["cookiefile"] = cookies_path
