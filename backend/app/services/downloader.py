@@ -83,6 +83,8 @@ def build_ydl_opts(
         "writethumbnail": False,
 
         "cookiefile": cookies_path,
+        # 禁止 yt-dlp 更新/覆写 cookies 文件（否则会把有效 cookies 替换为空文件）
+        "no_cookies_update": True,
 
         # 允许 deno 从 GitHub 下载 EJS challenge solver
         "remote_components": ["ejs:github"],
