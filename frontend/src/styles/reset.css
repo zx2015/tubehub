@@ -1481,3 +1481,85 @@ button {
   border: 1px solid rgba(255, 0, 0, 0.3);
   color: #ff8a8a;
 }
+
+/* ==========================================
+   确认弹窗 (ConfirmDialog) — 仿 AddDownloadDialog 浮动样式
+   ========================================== */
+.confirm-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.confirm-dialog {
+  background: var(--bg-elevated, #1f1f1f);
+  color: var(--fg, #f1f1f1);
+  border-radius: 12px;
+  width: 420px;
+  max-width: 90vw;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  animation: confirm-dialog-in 0.15s ease;
+}
+
+@keyframes confirm-dialog-in {
+  from { opacity: 0; transform: scale(0.95) translateY(-8px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0);     }
+}
+
+.confirm-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px 0;
+}
+
+.confirm-dialog__title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--fg);
+}
+
+.confirm-dialog__close {
+  background: none;
+  border: none;
+  color: var(--fg-tertiary);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.confirm-dialog__close:hover { color: var(--accent); }
+
+.confirm-dialog__body {
+  padding: 14px 22px 20px;
+}
+
+.confirm-dialog__message {
+  font-size: 14px;
+  color: var(--fg-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* danger 模式：标题前加红色警告条 */
+.confirm-dialog--danger .confirm-dialog__title {
+  color: var(--accent);
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border);
+}

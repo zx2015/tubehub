@@ -1,11 +1,7 @@
 /**
- * ConfirmDialog — 通用确认弹窗
+ * ConfirmDialog — 通用确认弹窗（仿 AddDownloadDialog 浮动窗口风格）
  *
  * 设计依据：docs/design/04-frontend-components.md §4.7
- *
- * 行为：
- *  - 通过 props 控制 open / 标题 / 描述 / 确认按钮文案
- *  - onConfirm / onCancel 回调由父组件处理
  */
 interface ConfirmDialogProps {
   open: boolean;
@@ -38,17 +34,30 @@ export function ConfirmDialog({
       onClick={onCancel}
     >
       <div
-        className="confirm-dialog"
+        className={`confirm-dialog${danger ? ' confirm-dialog--danger' : ''}`}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="confirm-dialog__title">{title}</h2>
-        <p className="confirm-dialog__message">{message}</p>
-        <div className="confirm-dialog__actions">
+        {/* 标题栏 + 关闭按钮 */}
+        <div className="confirm-dialog__header">
+          <h2 className="confirm-dialog__title">{title}</h2>
           <button
             type="button"
-            className="btn btn--ghost"
+            className="confirm-dialog__close"
             onClick={onCancel}
+            aria-label="关闭"
           >
+            ✕
+          </button>
+        </div>
+
+        {/* 消息正文 */}
+        <div className="confirm-dialog__body">
+          <p className="confirm-dialog__message">{message}</p>
+        </div>
+
+        {/* 操作按钮 */}
+        <div className="confirm-dialog__actions">
+          <button type="button" className="btn btn--ghost" onClick={onCancel}>
             {cancelText}
           </button>
           <button
