@@ -13,9 +13,11 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # 只挂载运行时数据目录（不挂载代码，从镜像运行）
-      - /home/tubehub/repo/data:/app/data
-      - /home/tubehub/repo/logs:/app/logs
+      # 数据目录挂载到 HDD（/home 在 /dev/sda1，644G 可用）
+      # /home/tubehub/data  → 存放 DB、视频、缩略图、cookies
+      # /home/tubehub/logs  → 存放运行日志
+      - /home/tubehub/data:/app/data
+      - /home/tubehub/logs:/app/logs
     environment:
       - PYTHONPATH=/app/backend
       - HTTP_PROXY=${HTTP_PROXY:-}
