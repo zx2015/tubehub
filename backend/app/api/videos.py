@@ -21,15 +21,17 @@ from app.schemas.video import (
 
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 
-# 工作目录相对路径转绝对路径的基准（与 database.py 保持一致）
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 
 def _resolve_path(path: str) -> str:
-    """将相对路径转为绝对路径，绝对路径原样返回。"""
+    """将相对路径转为绝对路径。
+
+    相对路径以进程 CWD（entrypoint.sh 中设为 /app）为基准解析，
+    保证与 thumbnail.py / downloader.py 的 data/ 路径一致。
+    绝对路径原样返回。
+    """
     if os.path.isabs(path):
         return path
-    return os.path.join(_BASE_DIR, path)
+    return os.path.abspath(path)  # 相对于 os.getcwd() = /app
 
 
 @router.get("", response_model=list[VideoRead])
