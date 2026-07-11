@@ -31,6 +31,9 @@ _worker_tasks: set[asyncio.Task] = set()
 # pending 超时阈值（秒）：超过此时间仍是 pending 的任务视为卡死
 _PENDING_TIMEOUT_SECS = 30
 
+# downloading/merging 超时阈值（秒）：超过此时间无进度更新视为 worker 死亡
+_RUNNING_TIMEOUT_SECS = 600  # 10 分钟
+
 
 def _get_worker():
     """延迟导入：避免 scheduler <-> downloader 循环依赖。"""
@@ -49,26 +52,44 @@ def _free_slots() -> int:
 
 
 async def _recover_stuck_pending() -> None:
-    """将卡住的 pending 任务（超过 _PENDING_TIMEOUT_SECS）回滚到 queued。
+    """将卡住的任务回滚到 queued。
 
-    场景：worker 在 create_task 前后崩溃，任务状态留在 pending 无人处理。
+    覆盖两种场景：
+    1. pending 超过 30s：worker 在 create_task 前后崩溃
+    2. downloading/merging 超过 10 分钟无进度更新：worker 意外死亡
     """
-    cutoff = datetime.utcnow() - timedelta(seconds=_PENDING_TIMEOUT_SECS)
+    now = datetime.utcnow()
+    pending_cutoff = now - timedelta(seconds=_PENDING_TIMEOUT_SECS)
+    running_cutoff = now - timedelta(seconds=_RUNNING_TIMEOUT_SECS)
     try:
         async with AsyncSessionLocal() as db:
-            result = await db.execute(
+            # 卡死的 pending 任务
+            r1 = await db.execute(
                 update(DownloadTask)
                 .where(
                     DownloadTask.status == "pending",
-                    DownloadTask.updated_at < cutoff,
+                    DownloadTask.updated_at < pending_cutoff,
                 )
                 .values(status="queued")
             )
-            if result.rowcount:
+            # 卡死的 downloading/merging 任务（无活跃 worker 且长时间无更新）
+            r2 = await db.execute(
+                update(DownloadTask)
+                .where(
+                    DownloadTask.status.in_(["downloading", "merging"]),
+                    DownloadTask.updated_at < running_cutoff,
+                    # 只回滚没有活跃 worker 的任务（cancel_events 不含此 id）
+                    DownloadTask.id.not_in(list(cancel_events.keys()) or [-1]),
+                )
+                .values(status="queued", progress=0.0, speed=None, eta=None,
+                        downloaded_bytes=0, error_message=None)
+            )
+            total = r1.rowcount + r2.rowcount
+            if total:
                 await db.commit()
                 logger.warning(
-                    "stuck-recovery: rolled back %d pending task(s) to queued",
-                    result.rowcount,
+                    "stuck-recovery: rolled back %d pending + %d downloading/merging tasks to queued",
+                    r1.rowcount, r2.rowcount,
                 )
     except Exception as e:  # noqa: BLE001
         logger.warning("stuck-recovery error: %s", e)
