@@ -12,7 +12,7 @@
  *  - 单删 / 批量删使用 ConfirmDialog 兜底
  *  - API 失败时降级为空状态
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import type { VideoRead } from '../types';
 import VideoCard from './VideoCard';
@@ -48,6 +48,12 @@ export function VideoLibrary() {
   const [keyword, setKeyword] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('created_desc');
   const [watchFilter, setWatchFilter] = useState<WatchFilter>('all');
+
+  // 每 30 秒自动刷新一次视频列表（下载完成后无需手动 F5）
+  useEffect(() => {
+    const timer = setInterval(() => { reload(); }, 30_000);
+    return () => clearInterval(timer);
+  }, [reload]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [pendingDelete, setPendingDelete] = useState<number | null>(null);
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
