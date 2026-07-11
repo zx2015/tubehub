@@ -1308,3 +1308,173 @@ button {
   background-color: #2a2a2a;
   color: #ff0000;
 }
+
+/* ==========================================
+   设置页 (Settings)
+   ========================================== */
+.settings {
+  max-width: 720px;
+  margin: 0 auto;
+  padding-bottom: 48px;
+}
+
+.settings__title {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 24px;
+  color: var(--fg);
+}
+
+.settings__section {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  margin-bottom: 20px;
+}
+
+.settings__section h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--fg);
+}
+
+.settings__hint {
+  font-size: 13px;
+  color: var(--fg-secondary);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.settings__hint code {
+  background: rgba(255,255,255,0.08);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* Cookie 状态行 */
+.settings__cookie-status {
+  font-size: 13px;
+  color: var(--fg-secondary);
+  margin-bottom: 16px;
+}
+
+.settings__status--ok {
+  color: #4caf50;
+}
+
+.settings__status--muted {
+  color: var(--fg-tertiary);
+}
+
+.settings__status-time {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--fg-tertiary);
+}
+
+/* 拖拽上传区 */
+.settings__drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 24px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.settings__drop-zone:hover,
+.settings__drop-zone--active {
+  border-color: var(--accent);
+  background: rgba(255, 0, 0, 0.04);
+}
+
+.settings__drop-icon {
+  font-size: 28px;
+  pointer-events: none;
+}
+
+.settings__drop-text {
+  font-size: 14px;
+  color: var(--fg);
+  pointer-events: none;
+}
+
+.settings__drop-hint {
+  font-size: 12px;
+  color: var(--fg-tertiary);
+  pointer-events: none;
+}
+
+/* 分隔线 */
+.settings__divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0 12px;
+  color: var(--fg-tertiary);
+  font-size: 12px;
+}
+
+.settings__divider::before,
+.settings__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* 文本区域 */
+.settings__textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-size: 12px;
+  font-family: monospace;
+  padding: 10px 12px;
+  resize: vertical;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+  transition: border-color var(--transition);
+}
+
+.settings__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings__row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* 反馈消息 */
+.settings__msg {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.settings__msg--ok {
+  background: rgba(76, 175, 80, 0.1);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  color: #81c784;
+}
+
+.settings__msg--err {
+  background: rgba(255, 0, 0, 0.08);
+  border: 1px solid rgba(255, 0, 0, 0.3);
+  color: #ff8a8a;
+}

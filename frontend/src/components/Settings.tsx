@@ -1,48 +1,82 @@
 /**
- * Settings — 全局设置页 (极简自愈版)
+ * Settings — 全局设置页
  *
- * 移除前端代理配置（已重构至系统环境变量 .env 全局代理，由 Docker 自愈容器隐式捕获）。
+ * Cookie 管理：支持两种上传方式
+ *   1. 选择本地 .txt 文件上传
+ *   2. 直接粘贴文本内容
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CookieStatus } from '../types';
 
 export function Settings() {
-  // Cookie 状态
-  const [cookieText, setCookieText] = useState('');
+  const [cookieText, setCookieText]     = useState('');
   const [cookieStatus, setCookieStatus] = useState<CookieStatus | null>(null);
-  const [cookieMsg, setCookieMsg] = useState<string | null>(null);
+  const [cookieMsg, setCookieMsg]       = useState<string | null>(null);
+  const [uploading, setUploading]       = useState(false);
+  const [dragOver, setDragOver]         = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 初次挂载拉取 Cookie 当前状态
   useEffect(() => {
     fetch('/api/settings/cookies')
       .then(async (r) => (r.ok ? ((await r.json()) as CookieStatus) : null))
-      .then((s) => {
-        if (s) setCookieStatus(s);
-      })
+      .then((s) => { if (s) setCookieStatus(s); })
       .catch(() => undefined);
   }, []);
 
-  // === Cookie 操作 ===
-  const handleUploadCookie = async () => {
-    if (!cookieText.trim()) {
-      setCookieMsg('请粘贴 Cookie 内容');
+  // 核心：发送文本内容到后端
+  const submitCookies = async (content: string) => {
+    if (!content.trim()) {
+      setCookieMsg('❌ Cookie 内容为空');
       return;
     }
+    setUploading(true);
     setCookieMsg(null);
     try {
       const resp = await fetch('/api/settings/cookies', {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: cookieText,
+        body: content,
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const status = (await resp.json()) as CookieStatus;
       setCookieStatus(status);
       setCookieText('');
-      setCookieMsg('✅ Cookie 已上传');
+      setCookieMsg(`✅ Cookie 已上传（${status.file_size ?? 0} 字节）`);
     } catch (err) {
       setCookieMsg(`❌ 上传失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setUploading(false);
     }
+  };
+
+  // 读取 File 对象并提交
+  const handleFile = (file: File) => {
+    if (!file.name.endsWith('.txt') && file.type !== 'text/plain') {
+      setCookieMsg('❌ 请选择 .txt 格式的 Cookie 文件');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      submitCookies(text);
+    };
+    reader.readAsText(file, 'utf-8');
+  };
+
+  // 文件选择框回调
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleFile(file);
+    // 重置 input，允许重复选同一文件
+    e.target.value = '';
+  };
+
+  // 拖拽上传
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleFile(file);
   };
 
   const handleClearCookie = async () => {
@@ -65,53 +99,96 @@ export function Settings() {
       <section className="settings__section">
         <h2>Cookie 管理</h2>
         <p className="settings__hint">
-          当下载受限视频（如年龄限制、会员内容）时，可粘贴浏览器导出的 Netscape 格式 Cookie。
+          当下载受限视频（年龄限制、Bot 检测等）时，请上传浏览器导出的
+          <strong> Netscape 格式</strong> Cookie 文件（通过浏览器扩展导出为 .txt）。
         </p>
+
+        {/* 状态栏 */}
         <div className="settings__cookie-status">
           状态：
           {cookieStatus?.has_cookie ? (
             <strong className="settings__status--ok">
-              {' '}已配置 ({cookieStatus.file_size ?? '?'} 字节)
+              ✅ 已配置（{cookieStatus.file_size ?? '?'} 字节）
+              {cookieStatus.updated_at && (
+                <span className="settings__status-time">
+                  {' '}· 更新于 {new Date(cookieStatus.updated_at).toLocaleString('zh-CN')}
+                </span>
+              )}
             </strong>
           ) : (
-            <strong className="settings__status--muted"> 未配置</strong>
+            <strong className="settings__status--muted">⚠️ 未配置</strong>
           )}
         </div>
+
+        {/* 文件拖拽区 */}
+        <div
+          className={`settings__drop-zone${dragOver ? ' settings__drop-zone--active' : ''}`}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <span className="settings__drop-icon">📂</span>
+          <span className="settings__drop-text">
+            点击选择 cookies.txt 文件，或拖拽文件到此处
+          </span>
+          <span className="settings__drop-hint">仅支持 Netscape 格式 .txt 文件</span>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".txt,text/plain"
+            style={{ display: 'none' }}
+            onChange={handleFileInput}
+          />
+        </div>
+
+        {/* 分隔线 */}
+        <div className="settings__divider">
+          <span>或者手动粘贴</span>
+        </div>
+
+        {/* 文本粘贴区 */}
         <textarea
           className="settings__textarea"
-          rows={8}
-          placeholder="# Netscape HTTP Cookie File..."
+          rows={6}
+          placeholder="# Netscape HTTP Cookie File&#10;# 将 cookies.txt 内容粘贴到此处..."
           value={cookieText}
           onChange={(e) => setCookieText(e.target.value)}
         />
+
         <div className="settings__row">
           <button
             type="button"
             className="btn btn--primary"
-            onClick={handleUploadCookie}
+            onClick={() => submitCookies(cookieText)}
+            disabled={uploading || !cookieText.trim()}
           >
-            上传
+            {uploading ? '上传中…' : '粘贴上传'}
           </button>
           <button
             type="button"
-            className="btn btn--ghost"
+            className="btn btn--danger"
             onClick={handleClearCookie}
             disabled={!cookieStatus?.has_cookie}
           >
-            清除
+            清除 Cookie
           </button>
         </div>
-        {cookieMsg && <div className="settings__msg">{cookieMsg}</div>}
+
+        {cookieMsg && (
+          <div className={`settings__msg${cookieMsg.startsWith('✅') ? ' settings__msg--ok' : ' settings__msg--err'}`}>
+            {cookieMsg}
+          </div>
+        )}
       </section>
 
-      {/* Info Section */}
+      {/* 代理说明 */}
       <section className="settings__section" style={{ marginTop: '32px' }}>
         <h2>全局网络代理</h2>
         <p className="settings__hint" style={{ lineHeight: '1.6' }}>
-          💡 代理配置现已升级：您可以直接在宿主机 <strong>.env</strong> 中通过 
-          <code> HTTP_PROXY</code> 与 <code> HTTPS_PROXY</code> 统一配置系统级代理。<br />
-          容器启动时会全自动应用于 <strong>Git 更新</strong>、<strong>Pip 依赖更新</strong>、
-          <strong>yt-dlp 视频流下载</strong>、以及 <strong>缩略图代理缓存</strong>，实现了全系统的自愈与统一。
+          💡 代理通过宿主机 <strong>.env</strong> 中的
+          <code> HTTP_PROXY</code> / <code>HTTPS_PROXY</code> 统一配置，
+          自动应用于 yt-dlp 下载、缩略图抓取等所有网络请求。
         </p>
       </section>
     </div>
