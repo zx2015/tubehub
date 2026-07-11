@@ -21,11 +21,15 @@ class SettingsService:
 
     @staticmethod
     async def set_cookies(content: str) -> None:
-        """上传并保存 Cookie（存 DB + 落盘）"""
-        # 1. 写入本地供 yt-dlp 快速调用
+        """上传并保存 Cookie（存 DB + 落盘 + 设只读防覆写）"""
+        # 1. 写入本地供 yt-dlp 快速调用，设只读防止被 yt-dlp 覆写
         os.makedirs("data", exist_ok=True)
+        # 先解除只读（如果之前已设置）
+        if os.path.exists(COOKIES_FILE_PATH):
+            os.chmod(COOKIES_FILE_PATH, 0o644)
         with open(COOKIES_FILE_PATH, "w", encoding="utf-8") as f:
             f.write(content)
+        os.chmod(COOKIES_FILE_PATH, 0o444)  # 只读，防止 yt-dlp 覆写
 
         # 2. 存数据库防丢失（多机或重建时可恢复）
         async with AsyncSessionLocal() as db:
@@ -41,6 +45,7 @@ class SettingsService:
     async def clear_cookies() -> None:
         """清理 Cookie"""
         if os.path.exists(COOKIES_FILE_PATH):
+            os.chmod(COOKIES_FILE_PATH, 0o644)  # 先解除只读再删除
             os.remove(COOKIES_FILE_PATH)
         async with AsyncSessionLocal() as db:
             setting = await db.get(SystemSetting, "ytdlp_cookies")

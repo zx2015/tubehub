@@ -22,38 +22,37 @@ from .middleware import register_exception_handlers
 
 
 async def _restore_cookies_from_db() -> None:
-    """启动时将 DB 中保存的 cookies 同步到本地文件。
+    """启动时将 DB 中保存的 cookies 同步到本地文件，并设为只读防止 yt-dlp 覆写。
 
-    场景：容器重建后本地 cookies.txt 丢失或为旧版本，DB 里仍有最新备份。
-    策略：若 DB 有记录且与文件内容不同，以 DB 为准覆盖。
+    场景：容器重建后本地 cookies.txt 被 yt-dlp 覆写为空文件，DB 里仍有最新备份。
+    策略：无论文件是否存在，始终以 DB 内容为准写入；写入后设为只读（444）。
     """
     cookies_path = "data/cookies.txt"
     try:
-        # 在 session 内完整取出 value，避免 session 关闭后 lazy-load 失败
         async with AsyncSessionLocal() as db:
             setting = await db.get(SystemSetting, "ytdlp_cookies")
             db_content: str = setting.value if setting else ""
 
         if not db_content.strip():
-            return  # DB 无记录，无需同步
+            logger.debug("No cookies in DB, skipping restore")
+            return
 
-        # 读取现有文件内容
-        file_content = ""
+        os.makedirs("data", exist_ok=True)
+
+        # 先确保文件可写（可能是上次设置的只读）
         if os.path.exists(cookies_path):
-            with open(cookies_path, "r", encoding="utf-8") as f:
-                file_content = f.read()
+            os.chmod(cookies_path, 0o644)
 
-        # 文件内容与 DB 不一致时（按长度快速比对），以 DB 为准覆盖
-        if len(file_content.strip()) != len(db_content.strip()):
-            os.makedirs("data", exist_ok=True)
-            with open(cookies_path, "w", encoding="utf-8") as f:
-                f.write(db_content)
-            logger.info(
-                "cookies.txt restored from DB ({} bytes, was {} bytes)",
-                len(db_content), len(file_content),
-            )
-        else:
-            logger.info("cookies.txt is up-to-date with DB ({} bytes)", len(db_content))
+        with open(cookies_path, "w", encoding="utf-8") as f:
+            f.write(db_content)
+
+        # 设为只读，防止 yt-dlp 在下载时覆写
+        os.chmod(cookies_path, 0o444)
+
+        logger.info(
+            "cookies.txt restored from DB and set read-only ({} bytes)",
+            len(db_content),
+        )
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to restore cookies from DB: %s", e)
 
