@@ -2,8 +2,8 @@
 
 复刻自 docs/design/02-api-design.md §2.2.1
 """
-from pydantic import BaseModel, Field, HttpUrl
-from typing import Optional
+from pydantic import BaseModel, Field, HttpUrl, field_validator
+from typing import Optional, Any
 from datetime import datetime
 
 
@@ -67,10 +67,19 @@ class PlaylistEntryCreate(BaseModel):
 class DownloadCreateRequest(BaseModel):
     url: HttpUrl
     # v3.0 双 select 严格模式：format_id 为字符串（yt-dlp 可返回非纯数字 ID 如 "140-drc"）
+    # 同时接受前端传来的 int（如 137），自动转为 str
     video_format_id: Optional[str] = None
     audio_format_id: Optional[str] = None
     playlist_entries: Optional[list[PlaylistEntryCreate]] = None
     overwrite: bool = False
+
+    @field_validator("video_format_id", "audio_format_id", mode="before")
+    @classmethod
+    def coerce_format_id_to_str(cls, v: Any) -> Optional[str]:
+        """兼容前端传 int（137）或 str（"140-drc"），统一转为字符串。"""
+        if v is None:
+            return None
+        return str(v)
 
 
 # ----------------------------------------------------------------------

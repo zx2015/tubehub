@@ -103,9 +103,9 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url: checkedUrl,   // 用锁定 URL，不用实时输入框
-          video_format_id: Number(videoFormatId),
-          audio_format_id: Number(audioFormatId),
+          url: checkedUrl,
+          video_format_id: String(videoFormatId),   // 统一发字符串，兼容 "140-drc" 等非纯数字 ID
+          audio_format_id: String(audioFormatId),
           overwrite,
         }),
       });
