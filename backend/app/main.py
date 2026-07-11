@@ -32,9 +32,9 @@ async def _restore_cookies_from_db() -> None:
         # 在 session 内完整取出 value，避免 session 关闭后 lazy-load 失败
         async with AsyncSessionLocal() as db:
             setting = await db.get(SystemSetting, "ytdlp_cookies")
-            db_content: str = (setting.value if setting else "").strip()
+            db_content: str = setting.value if setting else ""
 
-        if not db_content:
+        if not db_content.strip():
             return  # DB 无记录，无需同步
 
         # 读取现有文件内容
@@ -43,17 +43,17 @@ async def _restore_cookies_from_db() -> None:
             with open(cookies_path, "r", encoding="utf-8") as f:
                 file_content = f.read()
 
-        # 文件内容与 DB 不一致时，以 DB 为准覆盖
-        if file_content.strip() != db_content:
+        # 文件内容与 DB 不一致时（按长度快速比对），以 DB 为准覆盖
+        if len(file_content.strip()) != len(db_content.strip()):
             os.makedirs("data", exist_ok=True)
             with open(cookies_path, "w", encoding="utf-8") as f:
                 f.write(db_content)
             logger.info(
-                "cookies.txt restored from DB (%d bytes, was %d bytes)",
+                "cookies.txt restored from DB ({} bytes, was {} bytes)",
                 len(db_content), len(file_content),
             )
         else:
-            logger.info("cookies.txt is up-to-date with DB (%d bytes)", len(db_content))
+            logger.info("cookies.txt is up-to-date with DB ({} bytes)", len(db_content))
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to restore cookies from DB: %s", e)
 
