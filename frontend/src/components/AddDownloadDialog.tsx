@@ -3,7 +3,6 @@ import { useState } from 'react';
 interface FormatOption {
   id: number;
   label: string;
-  // 可选的扩展字段
   ext?: string;
   height?: number;
   vcodec?: string;
@@ -12,12 +11,10 @@ interface FormatOption {
   filesize?: number | null;
 }
 
+/** 与后端 DownloadCheckResponse 字段对齐 */
 interface CheckResponse {
-  exists: boolean;
-  existing_video?: {
-    id: number;
-    title: string;
-  } | null;
+  conflict: boolean;           // 是否已存在（后端字段名）
+  existing_video?: { id: number; title: string } | null;
   youtube_id?: string | null;
   title?: string | null;
   thumbnail?: string | null;
@@ -33,6 +30,8 @@ interface AddDownloadDialogProps {
 
 export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownloadDialogProps) {
   const [url, setUrl] = useState('');
+  /** 检查成功时锁定的 URL，提交时使用此值，避免输入框被清空导致空 URL */
+  const [checkedUrl, setCheckedUrl] = useState('');
   const [checking, setChecking] = useState(false);
   const [creating, setCreating] = useState(false);
   const [checkResult, setCheckResult] = useState<CheckResponse | null>(null);
@@ -44,7 +43,8 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
   if (!open) return null;
 
   const handleCheck = async () => {
-    if (!url.trim()) {
+    const trimmed = url.trim();
+    if (!trimmed) {
       setErrorMsg('请先粘贴 YouTube 视频链接');
       return;
     }
@@ -55,13 +55,13 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
       const res = await fetch('/api/downloads/check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({ url: trimmed }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: CheckResponse = await res.json();
       setCheckResult(data);
+      setCheckedUrl(trimmed); // 锁定 URL
 
-      // 默认选中第一个
       if (data.video_formats && data.video_formats.length > 0) {
         setVideoFormatId(data.video_formats[0].id);
       } else {
@@ -73,8 +73,7 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
         setAudioFormatId('');
       }
 
-      // 如果已存在，自动勾选覆盖
-      if (data.exists) {
+      if (data.conflict) {
         setOverwrite(true);
       }
     } catch (e: any) {
@@ -85,7 +84,7 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
   };
 
   const handleSubmit = async () => {
-    if (!checkResult) {
+    if (!checkResult || !checkedUrl) {
       setErrorMsg('请先点击"获取信息"');
       return;
     }
@@ -93,7 +92,7 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
       setErrorMsg('视频格式与音频格式都必须选择');
       return;
     }
-    if (checkResult.exists && !overwrite) {
+    if (checkResult.conflict && !overwrite) {
       setErrorMsg('该视频已下载，请勾选"覆盖已存在"后重试');
       return;
     }
@@ -104,7 +103,7 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url: url.trim(),
+          url: checkedUrl,   // 用锁定 URL，不用实时输入框
           video_format_id: Number(videoFormatId),
           audio_format_id: Number(audioFormatId),
           overwrite,
@@ -115,7 +114,9 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
         throw new Error(text || `HTTP ${res.status}`);
       }
       const data = await res.json();
-      onCreated?.(data.id ?? 0);
+      // 后端返回 list，取第一条的 id
+      const taskId = Array.isArray(data) ? (data[0]?.id ?? 0) : (data?.id ?? 0);
+      onCreated?.(taskId);
       handleClose();
     } catch (e: any) {
       setErrorMsg(`提交失败: ${e?.message ?? e}`);
@@ -126,6 +127,7 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
 
   const handleClose = () => {
     setUrl('');
+    setCheckedUrl('');
     setCheckResult(null);
     setVideoFormatId('');
     setAudioFormatId('');
@@ -133,8 +135,6 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
     setErrorMsg(null);
     onClose();
   };
-
-  // (formatBytes removed: each format's label is precomputed on backend)
 
   return (
     <div
@@ -148,18 +148,13 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
       <div className="add-download__modal" onClick={(e) => e.stopPropagation()}>
         <header className="add-download__header">
           <h2 className="add-download__title">新增下载</h2>
-          <button
-            type="button"
-            className="add-download__close"
-            onClick={handleClose}
-            aria-label="关闭"
-          >
+          <button type="button" className="add-download__close" onClick={handleClose} aria-label="关闭">
             ✕
           </button>
         </header>
 
         <div className="add-download__body">
-          {/* URL + 获取信息 按钮 */}
+          {/* URL 输入 */}
           <div className="add-download__row add-download__row--url">
             <label className="add-download__label">YouTube 链接</label>
             <div className="add-download__url-group">
@@ -168,7 +163,14 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
                 type="text"
                 placeholder="https://www.youtube.com/watch?v=..."
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={(e) => {
+                  setUrl(e.target.value);
+                  // URL 变化时清除上次检查结果，要求重新获取
+                  if (checkResult) {
+                    setCheckResult(null);
+                    setCheckedUrl('');
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !checking) handleCheck();
                 }}
@@ -184,16 +186,15 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
             </div>
           </div>
 
-          {/* 解析结果区域 */}
+          {/* 检查结果 */}
           {checkResult && (
             <>
-              {checkResult.exists && checkResult.existing_video && (
+              {checkResult.conflict && checkResult.existing_video && (
                 <div className="add-download__notice add-download__notice--warn">
                   ⚠️ 该视频已在库中: <strong>{checkResult.existing_video.title}</strong>
                 </div>
               )}
 
-              {/* Title 一行 */}
               {checkResult.title && (
                 <div className="add-download__row">
                   <label className="add-download__label">标题</label>
@@ -201,7 +202,6 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
                 </div>
               )}
 
-              {/* 视频格式一行 */}
               {checkResult.video_formats && checkResult.video_formats.length > 0 && (
                 <div className="add-download__row">
                   <label className="add-download__label">视频格式</label>
@@ -211,15 +211,12 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
                     onChange={(e) => setVideoFormatId(Number(e.target.value))}
                   >
                     {checkResult.video_formats.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.label}
-                      </option>
+                      <option key={f.id} value={f.id}>{f.label}</option>
                     ))}
                   </select>
                 </div>
               )}
 
-              {/* 音频格式一行 */}
               {checkResult.audio_formats && checkResult.audio_formats.length > 0 && (
                 <div className="add-download__row">
                   <label className="add-download__label">音频格式</label>
@@ -229,16 +226,13 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
                     onChange={(e) => setAudioFormatId(Number(e.target.value))}
                   >
                     {checkResult.audio_formats.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.label}
-                      </option>
+                      <option key={f.id} value={f.id}>{f.label}</option>
                     ))}
                   </select>
                 </div>
               )}
 
-              {/* 覆盖选项（仅在已存在时显示） */}
-              {checkResult.exists && (
+              {checkResult.conflict && (
                 <div className="add-download__row add-download__row--checkbox">
                   <label className="add-download__checkbox">
                     <input
@@ -257,12 +251,7 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
         </div>
 
         <footer className="add-download__footer">
-          <button
-            type="button"
-            className="add-download__btn"
-            onClick={handleClose}
-            disabled={creating}
-          >
+          <button type="button" className="add-download__btn" onClick={handleClose} disabled={creating}>
             取消
           </button>
           <button
@@ -272,9 +261,10 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
             disabled={
               creating ||
               !checkResult ||
+              !checkedUrl ||
               !videoFormatId ||
               !audioFormatId ||
-              (checkResult.exists && !overwrite)
+              (checkResult.conflict && !overwrite)
             }
           >
             {creating ? '🚀 任务创建中...' : '开始下载'}
