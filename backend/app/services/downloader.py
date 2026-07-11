@@ -87,10 +87,14 @@ def build_ydl_opts(
         # 允许 deno 从 GitHub 下载 EJS challenge solver（yt-dlp 2026.07+ 需要）
         "remote_components": ["ejs:github"],
 
-        # 绕过 PO-Token 安全限制
+        # 跳过 403 分片，避免因单个 CDN 节点拒绝而导致整个下载失败
+        "skip_unavailable_fragments": True,
+
+        # 绕过 PO-Token 安全限制；
+        # 只使用 tv/web 客户端（ios/android 因缺少 GVS PO Token 可能 403）
         "extractor_args": {
             "youtube": {
-                "player_client": ["tv", "android", "web", "ios", "web_safari", "default"],
+                "player_client": ["tv", "web", "default"],
             }
         },
 
