@@ -171,19 +171,23 @@ def progress_callback(d: dict, task_id: int) -> None:
             )
         )
     elif d["status"] == "finished":
-        # 单个文件下载完成；合并阶段由 postprocessor_hook 接管
-        pass
+        # 单个文件（视频轨或音频轨）下载完成；合并阶段由 postprocessor_hook 接管
+        filename = d.get("filename") or d.get("tmpfilename") or ""
+        logger.info("Task %s: file download finished (%s)", task_id, os.path.basename(str(filename))[:60])
 
 
 def postprocessor_callback(d: dict, task_id: int) -> None:
     """postprocessor_hooks 回调：跟踪合并阶段。"""
     pp = d.get("postprocessor")
     status = d.get("status")
+    logger.debug("postprocessor_callback task=%s pp=%s status=%s", task_id, pp, status)
     # 仅在真正进入合并后处理器时切换为 merging，避免被其他 postprocessor 误伤
     if status == "started" and pp == "Merger":
+        logger.info("Task %s Merger started → merging", task_id)
         _schedule_coro(update_task_status(task_id, "merging"))
     elif status == "finished" and pp == "Merger":
         filepath = d.get("info_dict", {}).get("filepath")
+        logger.info("Task %s Merger finished → filepath=%s", task_id, filepath)
         _schedule_coro(on_download_finished(task_id, filepath))
 
 
@@ -335,19 +339,26 @@ async def _finalize_after_worker_success(task_id: int, info: Any) -> None:
     async with AsyncSessionLocal() as db:
         task = await db.get(DownloadTask, task_id)
         if not task:
+            logger.warning("_finalize_after_worker_success: task %s not found", task_id)
             return
-        # 已被 hook 收尾，直接返回
-        if task.status == "ready":
-            return
-        # 若已取消，不覆盖为 ready
-        if task.status == "cancelled":
-            return
+        current_status = task.status  # session 内读取，避免 detached 对象
+
+    logger.info(
+        "_finalize_after_worker_success task=%s status=%s filepath=%s",
+        task_id, current_status, filepath,
+    )
+
+    if current_status == "ready":
+        logger.debug("Task %s already ready, skip fallback finalize", task_id)
+        return
+    if current_status == "cancelled":
+        logger.debug("Task %s cancelled, skip fallback finalize", task_id)
+        return
 
     logger.warning(
-        "Task %s finished in worker but status=%s, applying fallback finalize (filepath=%s)",
-        task_id,
-        task.status,
-        filepath,
+        "Task %s: worker finished but status=%s (hook may have been lost), "
+        "applying fallback finalize (filepath=%s)",
+        task_id, current_status, filepath,
     )
     await on_download_finished(task_id, filepath)
 
