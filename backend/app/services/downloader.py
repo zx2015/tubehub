@@ -412,43 +412,60 @@ async def run_download_worker(task_id: int) -> None:
 
             await update_task_status(task_id, "downloading")
 
-            # 从 DB 读取 cookies 到临时文件（防止被 yt-dlp 覆写磁盘文件）
-            import sys as _sys; _sys.path.insert(0, '/app/backend')
+            # cookies：从 DB 读取到临时文件备用（防止被 yt-dlp 覆写磁盘文件）
             from app.services.scraper import _get_cookies_path
             cookies_path = _get_cookies_path()
-            logger.info(
-                f"Task {task_id}: cookies={'tmp file from DB' if cookies_path else 'None'}"
-            )
-
-
-            ydl_opts = build_ydl_opts(task, cookies_path, DATA_DIR)
-            logger.info(f"Task {task_id} download config locked - Cookies: {'data/cookies.txt' if cookies_path else 'None'} (env HTTP_PROXY active)")
-            CancellableYDL = make_cancellable_ydl(cancel_event)
 
             loop = asyncio.get_running_loop()
             # 关键:把主循环引用保存到模块级变量,供子线程中的 progress_hooks 使用
             import app.services.downloader as _dl_mod
             _dl_mod.MAIN_LOOP = loop
 
-            def _sync_download():
-                with CancellableYDL(ydl_opts) as ydl:
-                    # 1. 第一步：先 extract_info(download=False) 获取视频全部格式信息 (相当于 --list-formats 探针)
+            def _make_sync_download(cp: str | None):
+                """构造下载函数（cp=cookies_path 或 None）。"""
+                ydl_opts = build_ydl_opts(task, cp, DATA_DIR)
+                CancellableYDL = make_cancellable_ydl(cancel_event)
+                chosen_format = f"{task.video_format_id}+{task.audio_format_id}"
 
-                    # 2. 第二步：根据真实的 formats 列表，优选出最贴合高度限制的最佳音视频 format id 组合
-                    chosen_format = f"{task.video_format_id}+{task.audio_format_id}"
-                    logger.info(f"Task {task_id} using format: {chosen_format} (V:{task.video_format_id} + A:{task.audio_format_id})")
+                def _run():
+                    with CancellableYDL(ydl_opts) as ydl:
+                        ydl.params["format"] = chosen_format
+                        logger.info(
+                            f"Task {task_id} download start: format={chosen_format} "
+                            f"cookies={'yes' if cp else 'no'}"
+                        )
+                        return ydl.extract_info(task.url, download=True)
+                return _run
 
-                    # 动态更新 ydl_opts['format']
-                    ydl.params["format"] = chosen_format
-
-                    # 注意：任务入库时已包含真实 title（前置 API 阶段已抓取），
-                    # 此处不再自愈 Title
-
-                    # 3. 第三步：真正启动下载
-                    logger.info(f"Task {task_id} starting actual stream download with format: {chosen_format}")
-                    return ydl.extract_info(task.url, download=True)
-
-            info_dict = await loop.run_in_executor(None, _sync_download)
+            # 第一次：不带 cookies（android_vr 对公开视频无需认证）
+            info_dict = None
+            try:
+                info_dict = await loop.run_in_executor(None, _make_sync_download(None))
+            except Cancelled:
+                await mark_task_cancelled(task_id)
+                return
+            except Exception as e:
+                err_str = str(e)
+                # Bot 检测或需要登录 → 带 cookies 重试
+                if ("Sign in" in err_str or "bot" in err_str.lower() or
+                        "confirm" in err_str.lower() or "403" in err_str) and cookies_path:
+                    logger.warning(
+                        f"Task {task_id}: download failed without cookies ({err_str[:80]}), "
+                        f"retrying with cookies"
+                    )
+                    # 重置进度再重试
+                    await update_task_status(task_id, "downloading")
+                    try:
+                        info_dict = await loop.run_in_executor(
+                            None, _make_sync_download(cookies_path)
+                        )
+                    except Cancelled:
+                        await mark_task_cancelled(task_id)
+                        return
+                    except Exception as e2:
+                        raise e2  # cookies 也失败，走正常失败处理
+                else:
+                    raise  # 其他错误直接走失败处理
             # 正常情况下 postprocessor_hook 会把任务推到 ready。
             # 兜底：若 hook 丢失/未触发，worker 成功返回后强制收尾，避免卡在 merging。
             await _finalize_after_worker_success(task_id, info_dict)
