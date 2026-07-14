@@ -1563,3 +1563,90 @@ button {
   padding: 14px 22px;
   border-top: 1px solid var(--border);
 }
+
+/* ==========================================
+   播放页 (VideoPlayer)
+   ========================================== */
+
+/* 播放页让 main-content 不产生滚动，改为 flex 列布局 */
+.main-content:has(.video-player) {
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.video-player {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 标题栏：固定高度，不压缩 */
+.video-player__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: 52px;
+}
+
+.video-player__title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.video-player__uploader {
+  font-size: 13px;
+  color: var(--fg-secondary);
+  flex-shrink: 0;
+}
+
+/* 播放器舞台：占满剩余空间，黑色背景 */
+.video-player__stage {
+  flex: 1;
+  overflow: hidden;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* video.js 容器：充满父元素 */
+.video-js-container {
+  width: 100%;
+  height: 100%;
+}
+
+/* video.js 播放器本体：充满容器，保持 16:9 最大化 */
+.video-js-container .video-js {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 状态页（加载中/错误）居中显示 */
+.video-player__status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 200px;
+  color: var(--fg-secondary);
+  font-size: 14px;
+  gap: 16px;
+}
+
+.video-player__status--error {
+  color: var(--accent);
+}

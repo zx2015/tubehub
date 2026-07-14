@@ -37,7 +37,8 @@ export function VideoJSPlayer({ src, startPosition = 0, onProgress }: Props) {
 
     // 1. 自定义元素 video-js 由 video.js 注册，这里动态创建并挂载
     const videoEl = document.createElement('video-js');
-    videoEl.classList.add('vjs-big-play-centered', 'vjs-fluid');
+    videoEl.classList.add('vjs-big-play-centered');
+    // 不用 vjs-fluid，改为 fill 模式充满父容器，由 CSS 控制尺寸
     containerRef.current.appendChild(videoEl);
 
     // 2. 实例化 video.js 播放器
@@ -47,7 +48,7 @@ export function VideoJSPlayer({ src, startPosition = 0, onProgress }: Props) {
       preload: 'auto',
       playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2],
       sources: [{ src, type: 'video/mp4' }],
-      fluid: true,
+      fill: true,   // 充满父容器（替代 fluid）
     });
 
     playerRef.current = player;
