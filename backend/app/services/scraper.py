@@ -176,14 +176,43 @@ class ScraperService:
 
     @staticmethod
     def _sync_extract_info(url: str, cookies_path: str | None = None) -> dict:
-        opts = _base_opts(skip_download=True, cookies_path=cookies_path)
-        opts["extractor_args"] = _YDL_PROXY_BLOCK
-        logger.info(
-            "ScraperService: extracting %s (cookies=%s)",
-            url, cookies_path or "none",
-        )
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        """获取视频元数据。
+
+        策略：先不带 cookies 尝试（android_vr 对公开视频无需认证）；
+        若 YouTube 返回 Bot 检测错误，再带 cookies 重试一次。
+        这样可以减少 cookies 的消耗，延长其有效期。
+        """
+        def _do_extract(with_cookies: bool) -> dict:
+            cp = cookies_path if with_cookies else None
+            opts = _base_opts(skip_download=True, cookies_path=cp)
+            opts["extractor_args"] = _YDL_PROXY_BLOCK
+            logger.info(
+                "ScraperService: extracting %s (cookies=%s)",
+                url, "yes" if with_cookies else "no",
+            )
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(url, download=False)
+
+        # 第一次：不带 cookies
+        info = None
+        try:
+            info = _do_extract(with_cookies=False)
+        except Exception as e:
+            err_str = str(e)
+            # Bot 检测或需要登录 → 带 cookies 重试
+            if ("Sign in" in err_str or "bot" in err_str.lower() or
+                    "confirm" in err_str.lower()) and cookies_path:
+                logger.warning(
+                    "ScraperService: Bot detection without cookies, retrying with cookies (%s)",
+                    url,
+                )
+                try:
+                    info = _do_extract(with_cookies=True)
+                except Exception as e2:
+                    raise e2  # cookies 也失败，抛出最终错误
+            else:
+                raise  # 其他错误直接抛出
+
         if not info:
             raise ValueError("无法解析 YouTube URL")
 
