@@ -33,10 +33,17 @@ class DownloadCheckRequest(BaseModel):
 class ExistingVideoInfo(BaseModel):
     id: int
     title: str
-    video_format_id: Optional[int] = None
-    audio_format_id: Optional[int] = None
+    video_format_id: Optional[str] = None
+    audio_format_id: Optional[str] = None
     file_size: int
     last_position: float
+
+    @field_validator("video_format_id", "audio_format_id", mode="before")
+    @classmethod
+    def coerce_format_id_to_str(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return str(v)
 
 
 class DownloadCheckResponse(BaseModel):

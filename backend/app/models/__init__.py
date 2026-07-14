@@ -32,9 +32,9 @@ class Video(Base):
     vcodec = Column(String(32))
     acodec = Column(String(32))
     container = Column(String(16))
-    # v3.0 双 format_id（严格 list-formats，可为 None 兼容历史任务）
-    video_format_id = Column(Integer, nullable=True)
-    audio_format_id = Column(Integer, nullable=True)
+    # v3.0 双 format_id（严格 list-formats，str 类型兼容非纯数字 ID 如 "140-drc"）
+    video_format_id = Column(String(32), nullable=True)
+    audio_format_id = Column(String(32), nullable=True)
 
     last_position = Column(Float, default=0)
     last_watched_at = Column(DateTime)

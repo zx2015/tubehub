@@ -15,15 +15,15 @@ AsyncSessionLocal = sessionmaker(
 )
 
 
-# v3.0 字段升级：旧库 ALTER TABLE 新增列
+# v3.0+ 字段升级：旧库 ALTER TABLE 新增列（新列若已存在则跳过）
 _MIGRATION_COLUMNS = {
     "videos": [
-        ("video_format_id", "INTEGER"),
-        ("audio_format_id", "INTEGER"),
+        ("video_format_id", "VARCHAR(32)"),
+        ("audio_format_id", "VARCHAR(32)"),
     ],
     "download_tasks": [
-        ("video_format_id", "INTEGER NOT NULL DEFAULT 0"),
-        ("audio_format_id", "INTEGER NOT NULL DEFAULT 0"),
+        ("video_format_id", "VARCHAR(32) NOT NULL DEFAULT ''"),
+        ("audio_format_id", "VARCHAR(32) NOT NULL DEFAULT ''"),
     ],
 }
 
