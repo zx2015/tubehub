@@ -2,11 +2,16 @@
 
 > 来源：用户需求 §2, §6, §7, §8
 
-## 2.0 当前代码实现状态（2026-07-11）
+## 2.0 当前代码实现状态（2026-07-14）
 
 - 所有下载接口已完全实现：check/create/list/detail/delete/retry/SSE 进度流。
-- ScraperService 自动读取有效 cookies 并传给 yt-dlp；格式过滤支持严格+fallback 双层。
+- **无 cookies 优先策略**（scraper + downloader 均适用）：
+  - 先不带 cookies 尝试（`android_vr` 客户端，公开视频无需认证）
+  - Bot 检测 / 403 错误时自动带 cookies 重试
+- cookies 从 DB 实时读到 `/tmp` 临时只读文件，防止 yt-dlp 覆写。
+- 格式过滤支持严格层（`mp4+avc1`/`m4a+mp4a`）+ fallback 双层策略。
 - 重试机制已实现（最大 3 次，退避 0/30s/120s）；后台 `task_cleaner_loop` 已实现定时清理。
+- `stuck_recovery`：`downloading/merging` 超过 10 分钟无进度自动重置为 `queued`。
 - 当前为**单视频流程**，歌单批量下载尚未实现。
 
 ## 2.1 核心要求

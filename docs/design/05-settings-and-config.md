@@ -9,6 +9,7 @@
 | v1.0.0 | 2026-07-07 | 初始版本：支持 Cookies 与代理配置 | Gemini CLI |
 | v2.0.0 | 2026-07-08 | **架构重构**：移除 `ytdlp_proxy` 字段及所有代理接口。代理统一切到宿主机 `.env` 环境变量 | Gemini CLI |
 | v2.1.0 | 2026-07-11 | 补充 Cookies 安全规范：严禁入库 | Copilot |
+| v2.2.0 | 2026-07-14 | Cookies 防覆写机制：从 DB 读到临时只读文件；无 cookies 优先策略 | Copilot |
 
 ---
 
@@ -18,8 +19,8 @@
 >
 > **规范**：
 > - `*.txt`、`*_cookies.txt`、`cookies.txt` 已加入 `.gitignore`，任何 cookies 文件严禁 `git add`
-> - Cookies 仅通过 TubeHub 设置页上传，存入 `system_settings` 表（DB 不入库）和 `data/cookies.txt`（`data/` 已 ignore）
-> - 启动时自动从 DB 恢复到文件，重建容器不丢失
+> - Cookies 仅通过 TubeHub 设置页上传，存入 `system_settings` 表（DB）；启动时自动从 DB 恢复，重建容器不丢失
+> - 写入文件后 `chmod 444` 只读，防止 yt-dlp 运行时覆写
 
 ## 5.1 数据模型
 
@@ -27,10 +28,41 @@
 
 | key | 类型 | value 格式 | 含义 |
 |-----|------|------------|------|
-| `ytdlp_cookies` | Text | Netscape cookie 纯文本 | 用于突破 YouTube 年龄限制的 Cookie 原始文本 |
+| `ytdlp_cookies` | Text | Netscape cookie 纯文本 | 用于突破 YouTube Bot 检测/年龄限制的 Cookie |
 
 > ❌ **已废弃字段**：`ytdlp_proxy`（JSON ProxyConfig）。在 v2.0.0 重构中彻底从数据库中移除。
 > 现在的代理配置统一在 `backend/.env` 中以 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量形式管理，详见 [00-architecture.md §ADR-04](00-architecture.md)。
+
+## 5.1.1 Cookies 使用策略（无 cookies 优先）
+
+```
+用户请求获取信息 / 开始下载
+    │
+    ▼ 第一次：不带 cookies（android_vr 客户端，无需认证）
+    │
+    ├─ 成功 → 直接返回（大多数公开视频走此路径）
+    │
+    └─ 失败（错误含 "Sign in" / "bot" / "403"）
+            │
+            ▼ 第二次：带 cookies 重试（从 DB 读到 /tmp 临时只读文件）
+            │
+            ├─ 成功 → 返回
+            └─ 失败 → 抛出错误
+```
+
+**优点：**
+- 公开视频（大多数）完全不消耗 cookies，有效延长其使用寿命
+- cookies 过期时，公开视频不受影响，仍可正常下载
+- 受限视频自动触发带 cookies 的重试，用户无感知
+
+**Cookies 生命周期管理：**
+
+| 操作 | 实现 |
+|------|------|
+| 用户上传 | TubeHub 设置页 → `POST /api/settings/cookies` → 存 DB + 写磁盘文件（`chmod 444` 只读） |
+| 容器启动恢复 | `_restore_cookies_from_db()` 从 DB 读取，覆盖磁盘文件并设只读 |
+| yt-dlp 使用 | `_get_cookies_path()` 从 DB 实时读到 `/tmp/tmpXXX.txt`（只读临时文件），不影响磁盘文件 |
+| 防覆写 | 磁盘文件 `chmod 444` + yt-dlp 选项 `no_cookies_update=True` 双重保护 |
 
 ## 5.2 核心服务设计
 

@@ -10,21 +10,25 @@
 | v1.1.0 | 2026-07-07 | 追加动态格式、cookies、代理配置与端到端下载流程说明 | Gemini CLI |
 | v1.1.1 | 2026-07-10 | 按当前代码修正：单视频流程、格式过滤策略、清理任务状态 | Copilot |
 | v1.2.0 | 2026-07-11 | ScraperService 自动读取 cookies；格式过滤 fallback；deno JS 运行时 | Copilot |
+| v1.3.0 | 2026-07-14 | 无 cookies 优先策略（scraper + downloader）；Bot 检测自动重试 | Copilot |
 
 ---
 
-## 3.x 当前实现对照（2026-07-11）
+## 3.x 当前实现对照（2026-07-14）
 
 1. `POST /api/downloads` 当前实现为**单视频任务**，未实现歌单拆解入队。
-2. **ScraperService 自动读取 cookies**：`_get_cookies_path()` 自动检测 `data/cookies.txt` 有效性（验证 Netscape 格式），有效则传给 yt-dlp `cookiefile` 参数，解决 Bot 检测问题。
-3. **格式过滤双层策略**：
+2. **无 cookies 优先策略**（scraper + downloader 均适用）：
+   - **第一次**：不带 cookies 尝试（`android_vr` 客户端无需认证，对大多数公开视频有效）
+   - **第二次**（仅在失败时）：若错误包含 `Sign in` / `bot` / `403` 关键词，自动带 cookies 重试
+   - 优点：公开视频完全不消耗 cookies，有效延长 cookies 使用寿命
+3. **cookies 防覆写机制**：`_get_cookies_path()` 每次从 DB 实时读取写到 `/tmp` 临时只读文件（`chmod 444`），防止 yt-dlp 覆写用户 cookies。
+4. **格式过滤双层策略**：
    - 严格层：优先只保留 `mp4+avc1`（视频）/ `m4a+mp4a`（音频），浏览器 100% 兼容。
    - Fallback 层：严格过滤返回空时，自动降级为所有纯视频/纯音频轨（排除 progressive）。
-4. worker 下载阶段直接使用已入库的 `video_format_id+audio_format_id`，未再执行运行时二次优选。
-5. 缩略图下载由 `httpx.AsyncClient` 依赖 `HTTP_PROXY` 环境变量，无需手动传参。
+5. worker 下载阶段直接使用已入库的 `video_format_id+audio_format_id`，音视频合并使用 FFmpeg stream copy（零转码，不使用 GPU）。
 6. `task_cleaner_loop` / `history_cleaner_loop` **已实现**（Ready 3天 / Failed 30天 / History 30天）。
-7. **deno JS 运行时**：yt-dlp 2026.07+ 需要 deno 处理某些受限视频，已在 Dockerfile 安装。
-8. **路径对齐**：`_resolve_path` 改用 `os.path.abspath()`，以 CWD=`/app` 为基准，与 volume 挂载一致。
+7. `stuck_recovery`：每 30 秒扫描，将 `pending` 超过 30s、`downloading/merging` 超过 10 分钟（无活跃 worker）的任务重置回 `queued`。
+8. **deno JS 运行时**：yt-dlp 2026.07+ 需要 deno 处理受限视频的 n-challenge，已在 Dockerfile 安装。
 
 ## 3.0 端到端下载处理流程
 
