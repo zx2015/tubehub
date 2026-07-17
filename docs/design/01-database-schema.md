@@ -179,7 +179,25 @@ async def init_db():
 ## 1.5 迁移策略（ADR）
 
 - **MVP 阶段**：直接使用 `Base.metadata.create_all()`，不引入 Alembic。
+- **字段补全**：通过 `_ensure_columns()` 在启动时自动 ADD COLUMN（已实现）。
 - **生产阶段**：当 Schema 演进到需要保留数据时，引入 Alembic 初始化 baseline。
+
+## 1.6 videos 表字段填充状态（2026-07-17）
+
+| 字段 | 来源 | 当前填充状态 |
+|------|------|-------------|
+| `youtube_id` / `title` / `source_url` | scraper → create_download | ✅ 正常 |
+| `thumbnail_path` | thumbnail.py + on_download_finished | ✅ 正常 |
+| `file_path` / `video_format_id` / `audio_format_id` | on_download_finished | ✅ 正常 |
+| `duration` | yt-dlp info_dict（秒） | ❌ **未填充，全部 NULL** |
+| `uploader` | yt-dlp info_dict | ❌ **未填充，全部 NULL** |
+| `width` / `height` | yt-dlp info_dict | ❌ **未填充，全部 NULL** |
+| `last_position` | PATCH /api/videos/{id}/progress | ✅ 正常 |
+| `last_watched_at` | PATCH /api/videos/{id}/progress | ✅ 正常 |
+
+**计划修复（需求 03 §3.0.1）**：
+- `on_download_finished` 中透传 info_dict，提取 `duration`/`uploader`/`width`/`height` 写入
+- 一次性补全脚本：用 `ffprobe` 从 MP4 文件读取 `duration`/`width`/`height`
 
 ---
 

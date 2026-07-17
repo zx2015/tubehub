@@ -2,13 +2,89 @@
 
 > 来源：用户需求 §3
 
-## 3.0 当前代码实现状态（2026-07-11）
+## 3.0 当前代码实现状态（2026-07-17）
 
 - `GET /api/videos`、`GET /api/videos/{id}`、`DELETE /api/videos/{id}`（含物理文件删除）、`POST /api/videos/batch-delete` 均已实现。
 - `GET /api/videos/{id}/stream`：HTTP Range 分片流，支持拖拽进度条。
 - `PATCH /api/videos/{id}/progress`：upsert PlayHistory，≥95% 自动标记 completed。
 - `GET /api/videos/{id}/thumbnail`：优先读 DB 记录路径，自动 fallback youtube_id 查找，再 fallback 占位图。
-- 缩略图在创建下载任务时预拉取，下载完成入库时写入 `thumbnail_path`。路径解析改用 `os.path.abspath()` 对齐 CWD=`/app`。
+- 缩略图在创建下载任务时预拉取，下载完成入库时写入 `thumbnail_path`。
+- ⚠️ **待改进**：`Video.duration`/`uploader`/`width`/`height` 字段在 `on_download_finished` 时未填充，导致 DB 中均为 NULL。
+
+## 3.0.1 新功能需求（2026-07-17 提出）
+
+### F1 — 视频卡片显示总时长
+
+**来源**：用户需求"视频库的视频能显示视频的总时长"
+
+**当前状况**：
+- 前端 `VideoCard` 已有右下角时长角标（`video-card__duration`）和 `formatDuration()` 函数
+- 但 `Video.duration` 全部为 `NULL`，因此显示为 `00:00`
+- yt-dlp `info_dict` 在下载时已包含 `duration`（秒），但 `on_download_finished` 未将其写入 DB
+
+**需求**：
+- 新下载的视频在入库时自动从 yt-dlp `info_dict` 提取并保存 `duration`/`uploader`/`width`/`height`
+- 历史已入库视频通过 `ffprobe` 读取 MP4 文件元数据补全 `duration`
+- 前端卡片右下角显示格式：`mm:ss` 或 `h:mm:ss`（已实现，等 DB 有数据即可生效）
+- `duration` 为 NULL 时不显示时长角标（当前显示 `00:00`，需改为隐藏）
+
+**验收标准**：
+- 所有新下载视频时长角标显示正确
+- 历史视频补全后也能正确显示
+- `duration=0` 或 `NULL` 时不显示角标
+
+---
+
+### F2 — 视频卡片显示观看状态
+
+**来源**：用户需求"能显示视频的状态：未观看，已看完，观看到 xx:xx"
+
+**当前状况**：
+- `Video.last_position` 已存在，部分视频有播放进度
+- 前端 `calcStatus()` 已实现三态判断（`unwatched`/`watching`/`completed`）
+- 但 `watching` 状态仅显示底部红色进度条，**没有显示"看到 xx:xx"文字**
+- `duration` 为 NULL 时进度条宽度计算错误（除以 0）
+
+**需求**：
+
+| 状态 | 触发条件 | 显示方式 |
+|------|---------|---------|
+| 🆕 未观看 | `last_position = 0` 或 `last_watched_at IS NULL` | 缩略图角标：`🆕` |
+| ▶ 观看中 | `last_position > 5s` 且 `< duration × 0.95` | 底部红色进度条 **+** 元信息区显示"看到 xx:xx" |
+| ✓ 已看完 | `last_position / duration ≥ 0.95` | 缩略图角标：`✓` |
+
+**"看到 xx:xx"格式**：
+- 使用 `formatDuration(last_position)` 格式化
+- 位置：卡片下方元信息区，上传者/日期同行（或独立一行，设计待定）
+- 示例：`▶ 看到 12:34`
+
+**依赖关系**：F2 的进度条精确度依赖 F1（需要 `duration` 不为 NULL）
+
+---
+
+## 3.0.2 实现方案评估
+
+### 方案 A：仅修改新入库逻辑（最小改动）
+- ✅ 只改 `on_download_finished`，从 yt-dlp info_dict 提取元数据
+- ❌ 历史视频仍显示 `00:00`
+
+### 方案 B：新入库 + 补全历史数据（推荐）
+- ✅ 新入库自动填充
+- ✅ 一次性脚本用 `ffprobe` 补全历史视频（系统已装 FFmpeg 含 ffprobe）
+- ✅ 前端改动最小（字段已存在）
+- 补全脚本逻辑：`ffprobe -v quiet -print_format json -show_format {file_path}` 提取 duration
+
+### 需改动的文件
+
+| 文件 | 改动内容 | 优先级 |
+|------|---------|--------|
+| `backend/app/services/downloader.py` | `on_download_finished` 从 info_dict 提取 duration/uploader/width/height | P0 |
+| `backend/app/services/downloader.py` | `_finalize_after_worker_success` 透传 info_dict 供入库使用 | P0 |
+| `backend/一次性补全脚本` | 用 ffprobe 补全历史视频 duration/width/height | P0 |
+| `frontend/src/components/VideoCard.tsx` | `watching` 状态在元信息区显示"看到 xx:xx" | P0 |
+| `frontend/src/components/VideoCard.tsx` | `duration=NULL` 时隐藏时长角标 | P0 |
+| `frontend/src/styles/reset.css` | 元信息区状态标签样式 | P0 |
+| `backend/app/schemas/video.py` | `VideoRead` 可加 `uploader` 等字段（已有） | 已实现 |
 
 ## 3.1 缩略图来源分析（重要 ⚠️）
 

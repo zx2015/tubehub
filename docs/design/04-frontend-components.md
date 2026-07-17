@@ -2,17 +2,124 @@
 
 > 技术栈：React 18 + Vite + TypeScript + Vanilla CSS + video.js 8.x
 
-## 4.0 当前实现对照（2026-07-11）
+## 4.0 当前实现对照（2026-07-17）
 
 - 路由为 `/`、`/downloads`、`/watch/:id`、`/settings`，无独立历史页。
-- `AddDownloadDialog` 挂在 `DownloadTasks` 页面，已修复三处 Bug：
-  - `checkedUrl`：检查时锁定 URL，提交使用锁定值（防止输入框清空后提交空 URL 400）
-  - `conflict` 字段：与后端 `DownloadCheckResponse` 字段对齐（旧代码用 `exists`）
-  - `onCreated`：后端返回 `list`，正确取 `data[0].id`
-- `Settings` 页已实现：Cookies 状态展示 + **文件上传（点击/拖拽 .txt）** + 文本粘贴两种方式 + 代理说明。
-- 侧边栏支持折叠/展开（汉堡按钮，状态 `localStorage` 持久化，带 CSS 过渡动画）。
-- 播放链路已端到端打通：`/api/videos/{id}` 元数据、`/stream` Range 分片、`/progress` 进度记忆全部实现。
-- `useSSE` 同时监听具名 `progress` 事件和无名 `message` 事件，兼容两种 SSE 格式。
+- `AddDownloadDialog`：`checkedUrl` 锁定、`conflict` 字段对齐、`onCreated` 正确取 list[0].id。
+- `Settings` 页：Cookies 文件上传（点击/拖拽）+ 文本粘贴 + 代理说明。
+- 侧边栏：折叠/展开（汉堡按钮，`localStorage` 持久化）。
+- 播放链路端到端打通：`/api/videos/{id}`、`/stream`（Range）、`/progress`。
+- `useSSE` 兼容具名/无名 SSE 事件。
+- ⚠️ **待改进**：`VideoCard` 时长角标因 `duration=NULL` 显示 `00:00`；`watching` 状态缺少"看到 xx:xx"文字。
+
+## 4.0.1 VideoCard 新功能设计（2026-07-17）
+
+### F1 — 时长角标
+
+**目标**：右下角黑色角标正确显示视频时长。
+
+**条件**：
+- `duration > 0`：显示 `mm:ss` 或 `h:mm:ss`
+- `duration = 0` 或 `NULL`：**不显示**角标（避免 `00:00` 误导）
+
+**改动**（`VideoCard.tsx`）：
+```tsx
+// 改前
+<span className="video-card__duration">{durationStr}</span>
+
+// 改后
+{video.duration && video.duration > 0 && (
+  <span className="video-card__duration">{durationStr}</span>
+)}
+```
+
+### F2 — 观看状态显示
+
+**三种状态**：
+
+```
+┌─────────────────────────────────────┐
+│  [缩略图]                           │
+│                                [🆕] │  ← 未观看：右上角角标
+│  标题...                            │
+│  上传者 • 添加日期                   │
+└─────────────────────────────────────┘
+
+┌─────────────────────────────────────┐
+│  [缩略图]                           │
+│  ████████████░░░░░░░░░░░░░░░░░░░░│  ← watching：底部红色进度条
+│  标题...                            │
+│  上传者 • ▶ 看到 12:34              │  ← 元信息区新增状态行
+└─────────────────────────────────────┘
+
+┌─────────────────────────────────────┐
+│  [缩略图]                           │
+│                                [✓] │  ← 已看完：右上角角标
+│  标题...                            │
+│  上传者 • 添加日期                   │
+└─────────────────────────────────────┘
+```
+
+**"看到 xx:xx"显示规则**：
+- 仅在 `watching` 状态下显示
+- 格式：`▶ 看到 {formatDuration(last_position)}`
+- 位置：卡片元信息区，替换或追加在上传者/日期行之后
+- 样式：`video-card__watch-pos`，颜色使用 `--accent-blue`（醒目但不刺眼）
+
+**改动**（`VideoCard.tsx` 元信息区）：
+```tsx
+<div className="video-card__info-row">
+  {video.uploader && (
+    <span className="video-card__uploader">{video.uploader}</span>
+  )}
+  {status !== 'watching' && (
+    <>
+      <span className="video-card__dot-divider">•</span>
+      <span className="video-card__date">{dateStr || '刚刚'}</span>
+    </>
+  )}
+</div>
+{status === 'watching' && video.last_position > 0 && (
+  <div className="video-card__watch-pos">
+    ▶ 看到 {formatDuration(video.last_position)}
+  </div>
+)}
+```
+
+### 数据流（后端）
+
+```
+yt-dlp info_dict
+    │
+    ├─ duration (秒)
+    ├─ uploader (频道名)
+    ├─ width / height
+    └─ ...
+          │
+          ▼ on_download_finished(task_id, filepath, info_dict)
+          │
+          ▼ Video(
+              duration = info.get("duration"),
+              uploader = info.get("uploader") or info.get("channel"),
+              width    = info.get("width"),
+              height   = info.get("height"),
+              ...
+            )
+```
+
+**历史视频补全方案**（一次性脚本）：
+```python
+# 伪代码
+for video in videos_where_duration_is_null:
+    result = subprocess.run([
+        "ffprobe", "-v", "quiet", "-print_format", "json",
+        "-show_streams", video.file_path
+    ], capture_output=True)
+    info = json.loads(result.stdout)
+    video.duration = int(float(info["format"]["duration"]))
+    video.width    = info["streams"][0]["width"]
+    video.height   = info["streams"][0]["height"]
+```
 
 ## 4.1 路由设计
 
