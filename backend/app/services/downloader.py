@@ -187,8 +187,9 @@ def postprocessor_callback(d: dict, task_id: int) -> None:
         _schedule_coro(update_task_status(task_id, "merging"))
     elif status == "finished" and pp == "Merger":
         filepath = d.get("info_dict", {}).get("filepath")
+        info_dict = d.get("info_dict")
         logger.info("Task %s Merger finished → filepath=%s", task_id, filepath)
-        _schedule_coro(on_download_finished(task_id, filepath))
+        _schedule_coro(on_download_finished(task_id, filepath, info_dict))
 
 
 # ---------------------------------------------------------------------------
@@ -243,8 +244,11 @@ async def mark_task_cancelled(task_id: int) -> None:
     logger.info(f"Task {task_id} marked cancelled")
 
 
-async def on_download_finished(task_id: int, filepath: str | None) -> None:
-    """合并完成 → 入库 videos 表 + 写 ready。"""
+async def on_download_finished(task_id: int, filepath: str | None, info_dict: dict | None = None) -> None:
+    """合并完成 → 入库 videos 表 + 写 ready。
+
+    info_dict: yt-dlp extract_info 返回值，用于提取 duration/uploader/width/height。
+    """
     from app.services.thumbnail import THUMBNAIL_DIR, download_thumbnail
     import os
 
@@ -272,7 +276,29 @@ async def on_download_finished(task_id: int, filepath: str | None) -> None:
             if os.path.exists(candidate):
                 thumbnail_path = candidate
 
-        # 3. 写 videos（幂等按 youtube_id upsert）
+        # 3. 从 yt-dlp info_dict 提取视频元数据
+        meta: dict = {}
+        if isinstance(info_dict, dict):
+            meta = {
+                "duration": info_dict.get("duration"),
+                "uploader": info_dict.get("uploader") or info_dict.get("channel"),
+                "uploader_id": info_dict.get("uploader_id") or info_dict.get("channel_id"),
+                "upload_date": info_dict.get("upload_date"),
+                "width": info_dict.get("width"),
+                "height": info_dict.get("height"),
+                "fps": info_dict.get("fps"),
+                "description": (info_dict.get("description") or "")[:4096] or None,
+            }
+            # file_size：优先从 info_dict 取，否则读磁盘
+            requested = info_dict.get("requested_downloads") or []
+            if requested and isinstance(requested[0], dict):
+                meta["file_size"] = requested[0].get("filesize")
+            if not meta.get("file_size") and filepath and os.path.exists(filepath):
+                meta["file_size"] = os.path.getsize(filepath)
+        elif filepath and os.path.exists(filepath):
+            meta["file_size"] = os.path.getsize(filepath)
+
+        # 4. 写 videos（幂等按 youtube_id upsert）
         video = None
         if youtube_id:
             from sqlalchemy import select
@@ -289,17 +315,26 @@ async def on_download_finished(task_id: int, filepath: str | None) -> None:
                 thumbnail_path=thumbnail_path,
                 video_format_id=task.video_format_id,
                 audio_format_id=task.audio_format_id,
+                **{k: v for k, v in meta.items() if v is not None},
             )
             db.add(video)
         else:
-            # 已存在则补全缩略图路径（覆盖重下时更新）
+            # 已存在则补全/更新字段
             if thumbnail_path:
                 video.thumbnail_path = thumbnail_path
             if filepath:
                 video.file_path = filepath
+            for k, v in meta.items():
+                if v is not None:
+                    setattr(video, k, v)
 
         await db.commit()
-    logger.info(f"Task {task_id} ready, filepath={filepath}, thumbnail={thumbnail_path}")
+
+    duration_str = f"{meta.get('duration')}s" if meta.get('duration') else "unknown"
+    logger.info(
+        "Task %s ready: filepath=%s duration=%s uploader=%s",
+        task_id, filepath, duration_str, meta.get("uploader") or "unknown",
+    )
 
 
 def _extract_output_filepath(info: Any) -> str | None:
@@ -335,6 +370,8 @@ def _extract_output_filepath(info: Any) -> str | None:
 async def _finalize_after_worker_success(task_id: int, info: Any) -> None:
     """worker 成功返回后的兜底收尾，防止 postprocessor hook 丢事件导致卡住。"""
     filepath = _extract_output_filepath(info)
+    # info 本身就是 yt-dlp 的 info_dict，透传给 on_download_finished 以提取元数据
+    info_dict = info if isinstance(info, dict) else None
 
     async with AsyncSessionLocal() as db:
         task = await db.get(DownloadTask, task_id)
@@ -360,7 +397,7 @@ async def _finalize_after_worker_success(task_id: int, info: Any) -> None:
         "applying fallback finalize (filepath=%s)",
         task_id, current_status, filepath,
     )
-    await on_download_finished(task_id, filepath)
+    await on_download_finished(task_id, filepath, info_dict)
 
 
 async def handle_download_failure(task_id: int, error: str) -> None:

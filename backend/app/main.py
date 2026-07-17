@@ -22,11 +22,7 @@ from .middleware import register_exception_handlers
 
 
 async def _restore_cookies_from_db() -> None:
-    """启动时将 DB 中保存的 cookies 同步到本地文件，并设为只读防止 yt-dlp 覆写。
-
-    场景：容器重建后本地 cookies.txt 被 yt-dlp 覆写为空文件，DB 里仍有最新备份。
-    策略：无论文件是否存在，始终以 DB 内容为准写入；写入后设为只读（444）。
-    """
+    """启动时将 DB 中保存的 cookies 同步到本地文件，并设为只读防止 yt-dlp 覆写。"""
     cookies_path = "data/cookies.txt"
     try:
         async with AsyncSessionLocal() as db:
@@ -39,14 +35,12 @@ async def _restore_cookies_from_db() -> None:
 
         os.makedirs("data", exist_ok=True)
 
-        # 先确保文件可写（可能是上次设置的只读）
         if os.path.exists(cookies_path):
             os.chmod(cookies_path, 0o644)
 
         with open(cookies_path, "w", encoding="utf-8") as f:
             f.write(db_content)
 
-        # 设为只读，防止 yt-dlp 在下载时覆写
         os.chmod(cookies_path, 0o444)
 
         logger.info(
@@ -55,6 +49,91 @@ async def _restore_cookies_from_db() -> None:
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to restore cookies from DB: %s", e)
+
+
+async def _backfill_video_metadata() -> None:
+    """启动时用 ffprobe 补全历史视频的 duration/width/height。
+
+    仅处理 duration IS NULL 且文件存在的记录，避免重复执行影响性能。
+    """
+    import subprocess, json as _json
+    from sqlalchemy import select
+    from .models import Video
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Video).where(Video.duration.is_(None), Video.file_path.isnot(None))
+            )
+            videos = result.scalars().all()
+
+        if not videos:
+            return
+
+        logger.info("backfill_video_metadata: %d videos need duration fill", len(videos))
+        updated = 0
+
+        for video in videos:
+            fp = os.path.abspath(video.file_path) if video.file_path else None
+            if not fp or not os.path.exists(fp):
+                continue
+            try:
+                proc = subprocess.run(
+                    [
+                        "ffprobe", "-v", "quiet",
+                        "-print_format", "json",
+                        "-show_format", "-show_streams",
+                        fp,
+                    ],
+                    capture_output=True, text=True, timeout=15,
+                )
+                if proc.returncode != 0:
+                    continue
+                info = _json.loads(proc.stdout)
+
+                duration = None
+                width = None
+                height = None
+
+                fmt = info.get("format", {})
+                if fmt.get("duration"):
+                    try:
+                        duration = int(float(fmt["duration"]))
+                    except (ValueError, TypeError):
+                        pass
+
+                for stream in info.get("streams", []):
+                    if stream.get("codec_type") == "video":
+                        width = stream.get("width")
+                        height = stream.get("height")
+                        # fallback duration from stream
+                        if duration is None and stream.get("duration"):
+                            try:
+                                duration = int(float(stream["duration"]))
+                            except (ValueError, TypeError):
+                                pass
+                        break
+
+                if duration is not None or width is not None:
+                    async with AsyncSessionLocal() as db:
+                        v = await db.get(Video, video.id)
+                        if v:
+                            if duration is not None:
+                                v.duration = duration
+                            if width is not None:
+                                v.width = width
+                            if height is not None:
+                                v.height = height
+                            await db.commit()
+                    updated += 1
+
+            except Exception as e:  # noqa: BLE001
+                logger.debug("backfill failed for video %s: %s", video.id, e)
+
+        logger.info("backfill_video_metadata: updated %d/%d videos", updated, len(videos))
+
+    except Exception as e:  # noqa: BLE001
+        logger.warning("backfill_video_metadata error: %s", e)
 
 
 @asynccontextmanager
@@ -67,6 +146,9 @@ async def lifespan(app: FastAPI):
 
     # 启动时从 DB 恢复 cookies 文件（防止容器重建后文件丢失）
     await _restore_cookies_from_db()
+
+    # 启动时补全历史视频的 duration/width/height（异步后台，不阻塞启动）
+    asyncio.create_task(_backfill_video_metadata(), name="backfill_video_metadata")
 
     # 如果是测试环境，不启动真实的后台循环
     if os.getenv("TUBEHUB_ENV") == "test":

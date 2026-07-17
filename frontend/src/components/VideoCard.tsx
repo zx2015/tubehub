@@ -69,6 +69,10 @@ export function VideoCard({ video, selected, onSelect, onDelete }: VideoCardProp
     () => formatDuration(video.duration),
     [video.duration],
   );
+  const watchPosStr = useMemo(
+    () => (video.last_position > 0 ? formatDuration(video.last_position) : null),
+    [video.last_position],
+  );
   const dateStr = useMemo(() => formatDate(video.created_at), [video.created_at]);
 
   const thumbnailUrl = `/api/videos/${video.id}/thumbnail`;
@@ -86,8 +90,10 @@ export function VideoCard({ video, selected, onSelect, onDelete }: VideoCardProp
           />
         </Link>
 
-        {/* YouTube 经典：右下角时长 */}
-        <span className="video-card__duration">{durationStr}</span>
+        {/* YouTube 经典：右下角时长（duration 为 null/0 时不显示） */}
+        {video.duration != null && video.duration > 0 && (
+          <span className="video-card__duration">{durationStr}</span>
+        )}
 
         {/* 状态角标 (🆕 未播放 / ✓ 已看完) */}
         {status !== 'watching' && (
@@ -142,9 +148,19 @@ export function VideoCard({ video, selected, onSelect, onDelete }: VideoCardProp
           {video.uploader && (
             <span className="video-card__uploader">{video.uploader}</span>
           )}
-          <span className="video-card__dot-divider">•</span>
-          <span className="video-card__date">{dateStr || '刚刚'}</span>
+          {status !== 'watching' && (
+            <>
+              <span className="video-card__dot-divider">•</span>
+              <span className="video-card__date">{dateStr || '刚刚'}</span>
+            </>
+          )}
         </div>
+        {/* 观看中状态：显示"看到 xx:xx" */}
+        {status === 'watching' && watchPosStr && (
+          <div className="video-card__watch-pos">
+            ▶ 看到 {watchPosStr}
+          </div>
+        )}
       </div>
     </div>
   );

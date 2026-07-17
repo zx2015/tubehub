@@ -581,6 +581,16 @@ button {
   color: var(--fg-tertiary);
 }
 
+/* 观看位置标签：▶ 看到 xx:xx */
+.video-card__watch-pos {
+  font-size: 12px;
+  color: var(--accent-blue, #3ea6ff);
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* 响应式适配 */
 @media (max-width: 1024px) {
   .app-container {
