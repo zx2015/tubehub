@@ -2,9 +2,9 @@
 
 复刻自 docs/design/02-api-design.md §2.2.2
 """
-from pydantic import BaseModel, Field
-from datetime import datetime
-from typing import Optional
+from pydantic import BaseModel, Field, field_validator
+from datetime import datetime, date
+from typing import Optional, Any
 
 
 class VideoRead(BaseModel):
@@ -13,7 +13,7 @@ class VideoRead(BaseModel):
     title: str
     uploader: Optional[str] = None
     source_url: str = ""
-    upload_date: Optional[str] = None
+    upload_date: Optional[str] = None   # 前端展示用字符串，如 "2023-10-15"
     duration: Optional[int] = None
     thumbnail_path: Optional[str] = None
     file_size: Optional[int] = None
@@ -26,6 +26,16 @@ class VideoRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @field_validator("upload_date", mode="before")
+    @classmethod
+    def coerce_upload_date(cls, v: Any) -> Optional[str]:
+        """兼容 datetime.date 对象和字符串，统一转为 ISO 格式字符串。"""
+        if v is None:
+            return None
+        if isinstance(v, date):
+            return v.isoformat()   # "2023-10-15"
+        return str(v)
 
 
 class VideoProgressUpdate(BaseModel):
