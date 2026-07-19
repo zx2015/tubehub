@@ -501,7 +501,20 @@ async def run_download_worker(task_id: int) -> None:
                             f"Task {task_id} download start: format={chosen_format} "
                             f"cookies={'yes' if cp else 'no'}"
                         )
-                        return ydl.extract_info(task.url, download=True)
+                        try:
+                            return ydl.extract_info(task.url, download=True)
+                        except Exception as exc:
+                            err = str(exc)
+                            # 格式不可用时 fallback：尝试 video_format_id + bestaudio
+                            if "Requested format is not available" in err:
+                                fallback = f"{task.video_format_id}+bestaudio"
+                                logger.warning(
+                                    "Task %s: format %s unavailable, fallback to %s",
+                                    task_id, chosen_format, fallback,
+                                )
+                                ydl.params["format"] = fallback
+                                return ydl.extract_info(task.url, download=True)
+                            raise
                 return _run
 
             # 第一次：不带 cookies（android_vr 对公开视频无需认证）
