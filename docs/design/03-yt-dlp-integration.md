@@ -11,24 +11,72 @@
 | v1.1.1 | 2026-07-10 | 按当前代码修正：单视频流程、格式过滤策略、清理任务状态 | Copilot |
 | v1.2.0 | 2026-07-11 | ScraperService 自动读取 cookies；格式过滤 fallback；deno JS 运行时 | Copilot |
 | v1.3.0 | 2026-07-14 | 无 cookies 优先策略（scraper + downloader）；Bot 检测自动重试 | Copilot |
+| v1.4.0 | 2026-07-19 | 修复无 cookies 路径不传 extractor_args；格式不可用 fallback；upload_date 类型修复 | Copilot |
 
 ---
 
-## 3.x 当前实现对照（2026-07-14）
+## 3.x 当前实现对照（2026-07-19）
 
 1. `POST /api/downloads` 当前实现为**单视频任务**，未实现歌单拆解入队。
-2. **无 cookies 优先策略**（scraper + downloader 均适用）：
-   - **第一次**：不带 cookies 尝试（`android_vr` 客户端无需认证，对大多数公开视频有效）
-   - **第二次**（仅在失败时）：若错误包含 `Sign in` / `bot` / `403` 关键词，自动带 cookies 重试
-   - 优点：公开视频完全不消耗 cookies，有效延长 cookies 使用寿命
-3. **cookies 防覆写机制**：`_get_cookies_path()` 每次从 DB 实时读取写到 `/tmp` 临时只读文件（`chmod 444`），防止 yt-dlp 覆写用户 cookies。
-4. **格式过滤双层策略**：
-   - 严格层：优先只保留 `mp4+avc1`（视频）/ `m4a+mp4a`（音频），浏览器 100% 兼容。
-   - Fallback 层：严格过滤返回空时，自动降级为所有纯视频/纯音频轨（排除 progressive）。
-5. worker 下载阶段直接使用已入库的 `video_format_id+audio_format_id`，音视频合并使用 FFmpeg stream copy（零转码，不使用 GPU）。
-6. `task_cleaner_loop` / `history_cleaner_loop` **已实现**（Ready 3天 / Failed 30天 / History 30天）。
-7. `stuck_recovery`：每 30 秒扫描，将 `pending` 超过 30s、`downloading/merging` 超过 10 分钟（无活跃 worker）的任务重置回 `queued`。
-8. **deno JS 运行时**：yt-dlp 2026.07+ 需要 deno 处理受限视频的 n-challenge，已在 Dockerfile 安装。
+2. **并发控制**：`CONCURRENCY=1`，同一时间只允许 1 个下载任务，新任务进入 `queued` 等待。
+3. **无 cookies 优先策略**（scraper + downloader 均适用）：
+   - **第一次**：不带 cookies 且不传 `extractor_args`，让 yt-dlp 自动选择默认 client（通常是 `android_vr`，无需认证）
+   - **第二次**（仅在失败时）：若错误含 `Sign in` / `bot` / `403`，带 cookies 重试（同时传 `extractor_args`）
+   - 优点：公开视频完全不消耗 cookies；cookies 过期时公开视频不受影响
+4. **cookies 防覆写机制**：`_get_cookies_path()` 每次从 DB 实时读取写到 `/tmp` 临时只读文件（`chmod 444`），防止 yt-dlp 覆写。
+5. **格式不可用 fallback**：若指定 format_id 下载报 `Requested format is not available`，自动改为 `video_id+bestaudio` 重试。
+6. **格式过滤双层策略**：严格层（`mp4+avc1`/`m4a+mp4a`）→ fallback 层（所有纯轨道）。
+7. worker：FFmpeg stream copy 零转码合并，不使用 GPU。
+8. `stuck_recovery`：每 30 秒扫描，`pending` 超 30s / `downloading/merging` 超 10 分钟自动重置为 `queued`。
+9. **deno JS 运行时**：已在 Dockerfile 安装，处理带 cookies 的受限视频 n-challenge。
+
+## 3.y Cookies 问题排查指南
+
+### 症状与根因
+
+| 症状 | 根因 | 解决方案 |
+|------|------|----------|
+| 获取信息失败（HTTP 400），日志含 `Sign in to confirm you're not a bot` | cookies 过期被 YouTube 撤销 | 重新从浏览器导出 cookies 并上传 |
+| 无 cookies 路径也失败，但命令行不带 cookies 能成功 | scraper 传了 `extractor_args` 指定多个 client，有过期 cookies 文件时 yt-dlp 跳过 `android_vr` | **已修复**：无 cookies 路径不传 `extractor_args` |
+| 上传 cookies 后生效一段时间又失效 | cookies 在 YouTube 服务端被轮换（浏览器活跃使用后 session token 更新） | 导出 cookies 后立即上传，关闭浏览器里的 YouTube 标签页 |
+| 下载时 cookies 被覆写为空文件 | yt-dlp 某些 client 会写回 cookiefile | **已修复**：临时只读文件 + `no_cookies_update=True` |
+| 格式 ID 下载报 `Requested format is not available` | list-formats 时可见但实际下载被 YouTube 限制（如 format 139） | **已修复**：自动 fallback 到 `video_id+bestaudio` |
+
+### 关键技术说明
+
+**为什么无 cookies 路径不能传 `extractor_args`**：
+
+```
+yt-dlp 内部逻辑（2026.07+）：
+  有 cookiefile 时 → 跳过 android_vr（android 系客户端不支持 cookies）
+                   → 优先使用 tv / web client
+                   → 这些 client 需要有效认证
+
+无 cookies 时     → 默认选 android_vr
+                  → 无需认证，直接获取信息
+
+结论：当 cookiefile 存在（即使过期），指定 player_client 列表
+      包含 android_vr 也无效，yt-dlp 会跳过它。
+      因此无 cookies 路径必须不传 extractor_args。
+```
+
+**cookies 生命周期**：
+
+```
+用户操作                     YouTube 服务端
+  │                              │
+  ├─ 浏览器登录                  │
+  │                              ├─ 生成 PSIDTS session token
+  ├─ 立即导出 cookies            │
+  │                              │
+  ├─ 继续使用 YouTube           │
+  │                              ├─ 轮换 PSIDTS（旧 token 失效）
+  ├─ 上传旧 cookies             │
+  │                              │
+  └─ 失败（token 已轮换）       │
+
+正确流程：登录 → 立即导出 → 立即上传 → 关闭 YouTube 标签页
+```
 
 ## 3.0 端到端下载处理流程
 

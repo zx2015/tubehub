@@ -38,31 +38,50 @@
 ```
 用户请求获取信息 / 开始下载
     │
-    ▼ 第一次：不带 cookies（android_vr 客户端，无需认证）
+    ▼ 第一次：不带 cookies，不传 extractor_args
+    │         yt-dlp 默认选 android_vr（无需认证）
     │
     ├─ 成功 → 直接返回（大多数公开视频走此路径）
     │
     └─ 失败（错误含 "Sign in" / "bot" / "403"）
             │
-            ▼ 第二次：带 cookies 重试（从 DB 读到 /tmp 临时只读文件）
+            ▼ 第二次：带 cookies + extractor_args 重试
+            │         （从 DB 读到 /tmp 临时只读文件）
             │
             ├─ 成功 → 返回
-            └─ 失败 → 抛出错误
+            └─ 失败 → 抛出错误（cookies 过期，需重新上传）
 ```
 
+> ⚠️ **关键实现细节**：无 cookies 路径**不能传 `extractor_args`**。
+> 原因：当 `cookiefile` 存在（即使过期），yt-dlp 会跳过 `android_vr`
+> 转而尝试 `tv/web` client（需要认证），导致公开视频也失败。
+> 不传 `extractor_args` 时，yt-dlp 自动选择 `android_vr`，行为与命令行一致。
+
 **优点：**
-- 公开视频（大多数）完全不消耗 cookies，有效延长其使用寿命
-- cookies 过期时，公开视频不受影响，仍可正常下载
-- 受限视频自动触发带 cookies 的重试，用户无感知
+- 公开视频完全不消耗 cookies，有效延长 cookies 使用寿命
+- cookies 过期时，公开视频不受影响
+- 受限视频自动 fallback 使用 cookies，用户无感知
+
+**Cookies 正确上传流程（避免过期）：**
+
+```
+1. 浏览器访问 YouTube，确认已登录
+2. 立即用扩展导出 cookies（不要再点其他 YouTube 页面）
+3. 立即在 TubeHub 设置页上传
+4. 上传后关闭浏览器里的 YouTube 标签页
+   （继续使用 YouTube 会触发 session token 轮换，旧 cookies 失效）
+```
 
 **Cookies 生命周期管理：**
 
 | 操作 | 实现 |
 |------|------|
-| 用户上传 | TubeHub 设置页 → `POST /api/settings/cookies` → 存 DB + 写磁盘文件（`chmod 444` 只读） |
+| 用户上传 | `POST /api/settings/cookies` → 存 DB + 写磁盘文件（`chmod 444` 只读） |
 | 容器启动恢复 | `_restore_cookies_from_db()` 从 DB 读取，覆盖磁盘文件并设只读 |
-| yt-dlp 使用 | `_get_cookies_path()` 从 DB 实时读到 `/tmp/tmpXXX.txt`（只读临时文件），不影响磁盘文件 |
-| 防覆写 | 磁盘文件 `chmod 444` + yt-dlp 选项 `no_cookies_update=True` 双重保护 |
+| yt-dlp 使用 | `_get_cookies_path()` 从 DB 实时读到 `/tmp/tmpXXX.txt`（只读临时文件） |
+| 防覆写 | `chmod 444` + `no_cookies_update=True` 双重保护 |
+
+详细排查指南见 [docs/design/03-yt-dlp-integration.md §3.y](03-yt-dlp-integration.md)
 
 ## 5.2 核心服务设计
 
