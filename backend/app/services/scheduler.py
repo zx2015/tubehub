@@ -19,7 +19,7 @@ from app.models import DownloadTask
 logger = logging.getLogger(__name__)
 
 # 全局信号量：限制同时 downloading 的任务数（详见需求 02 §2.6）
-CONCURRENCY = 2
+CONCURRENCY = 1
 download_semaphore = asyncio.Semaphore(CONCURRENCY)
 
 # 取消事件池：worker 协程可通过它优雅终止
