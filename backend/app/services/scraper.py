@@ -185,7 +185,11 @@ class ScraperService:
         def _do_extract(with_cookies: bool) -> dict:
             cp = cookies_path if with_cookies else None
             opts = _base_opts(skip_download=True, cookies_path=cp)
-            opts["extractor_args"] = _YDL_PROXY_BLOCK
+            if with_cookies:
+                # 带 cookies 时指定 player_client，android_vr 不支持 cookies 会被跳过
+                opts["extractor_args"] = _YDL_PROXY_BLOCK
+            # 不带 cookies 时不设置 extractor_args，让 yt-dlp 自动选择
+            # （默认用 android_vr，无需认证，最稳定）
             logger.info(
                 "ScraperService: extracting %s (cookies=%s)",
                 url, "yes" if with_cookies else "no",
