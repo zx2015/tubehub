@@ -56,6 +56,25 @@ def _import_yt_dlp():
     return yt_dlp
 
 
+def _parse_upload_date(raw: object) -> "date | None":
+    """将 yt-dlp 的 upload_date 字符串（如 '20231015'）转为 Python date 对象。
+
+    SQLAlchemy Date 列只接受 datetime.date，不接受字符串。
+    """
+    from datetime import date as _date
+    if raw is None:
+        return None
+    if isinstance(raw, _date):
+        return raw
+    try:
+        s = str(raw).strip()
+        if len(s) == 8:
+            return _date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
 # ---------------------------------------------------------------------------
 # 动态格式解析逻辑（已确认 ✅ 替代静态 QUALITY_MAP 机制）
 # ---------------------------------------------------------------------------
@@ -283,7 +302,7 @@ async def on_download_finished(task_id: int, filepath: str | None, info_dict: di
                 "duration": info_dict.get("duration"),
                 "uploader": info_dict.get("uploader") or info_dict.get("channel"),
                 "uploader_id": info_dict.get("uploader_id") or info_dict.get("channel_id"),
-                "upload_date": info_dict.get("upload_date"),
+                "upload_date": _parse_upload_date(info_dict.get("upload_date")),
                 "width": info_dict.get("width"),
                 "height": info_dict.get("height"),
                 "fps": info_dict.get("fps"),
