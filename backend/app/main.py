@@ -63,7 +63,11 @@ async def _backfill_video_metadata() -> None:
     try:
         async with AsyncSessionLocal() as db:
             result = await db.execute(
-                select(Video).where(Video.duration.is_(None), Video.file_path.isnot(None))
+                select(Video).where(
+                    Video.duration.is_(None),
+                    Video.file_path.isnot(None),
+                    Video.file_path != "",
+                )
             )
             videos = result.scalars().all()
 

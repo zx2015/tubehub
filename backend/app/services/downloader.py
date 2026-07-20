@@ -8,9 +8,10 @@ yt-dlp 下载器核心实现
 """
 
 import asyncio
+import glob as _glob
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as _date
 from typing import Any
 
 from app.database import AsyncSessionLocal
@@ -56,12 +57,11 @@ def _import_yt_dlp():
     return yt_dlp
 
 
-def _parse_upload_date(raw: object) -> "date | None":
+def _parse_upload_date(raw: object) -> "_date | None":
     """将 yt-dlp 的 upload_date 字符串（如 '20231015'）转为 Python date 对象。
 
     SQLAlchemy Date 列只接受 datetime.date，不接受字符串。
     """
-    from datetime import date as _date
     if raw is None:
         return None
     if isinstance(raw, _date):
@@ -172,6 +172,9 @@ def _schedule_coro(coro):
         future = asyncio.run_coroutine_threadsafe(coro, loop)
 
         def _on_done(f):
+            if f.cancelled():
+                logger.debug("_schedule_coro: scheduled coroutine was cancelled")
+                return
             exc = f.exception()
             if exc:
                 logger.error("_schedule_coro: scheduled coroutine raised: %s", exc, exc_info=exc)
@@ -406,7 +409,6 @@ async def _scan_video_file(youtube_id: str | None) -> str | None:
     """当 info_dict 无法提供文件路径时，在磁盘上扫描已下载的视频文件。"""
     if not youtube_id:
         return None
-    import glob as _glob
     patterns = [
         f"{DATA_DIR}/**/*{youtube_id}*.mp4",
         f"{DATA_DIR}/**/*{youtube_id}*.mkv",

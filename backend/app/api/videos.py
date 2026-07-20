@@ -148,7 +148,10 @@ async def stream_video(
     if not video:
         raise HTTPException(status_code=404, detail=f"Video {video_id} not found")
     if not video.file_path:
-        raise HTTPException(status_code=404, detail="视频文件路径未记录")
+        raise HTTPException(
+            status_code=404,
+            detail="视频文件路径未记录（下载时未能确定输出文件路径，可尝试重新下载）",
+        )
 
     abs_path = _resolve_path(video.file_path)
     if not os.path.exists(abs_path):
