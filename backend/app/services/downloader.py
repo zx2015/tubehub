@@ -169,7 +169,14 @@ def _schedule_coro(coro):
             coro.close()
             return
     try:
-        asyncio.run_coroutine_threadsafe(coro, loop)
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+
+        def _on_done(f):
+            exc = f.exception()
+            if exc:
+                logger.error("_schedule_coro: scheduled coroutine raised: %s", exc, exc_info=exc)
+
+        future.add_done_callback(_on_done)
     except RuntimeError:
         coro.close()
 # ---------------------------------------------------------------------------
@@ -326,6 +333,9 @@ async def on_download_finished(task_id: int, filepath: str | None, info_dict: di
             ).scalar_one_or_none()
 
         if not video:
+            # filepath 为 None 时也创建记录，但 file_path 保持为空；
+            # 后续 ffprobe backfill 会在下次启动时补全元数据，
+            # 播放时若 file_path 为空会返回 404（明确失败比静默丢失好）
             video = Video(
                 youtube_id=youtube_id or f"unknown-{task_id}",
                 title=task.title or "Untitled",
@@ -337,12 +347,18 @@ async def on_download_finished(task_id: int, filepath: str | None, info_dict: di
                 **{k: v for k, v in meta.items() if v is not None},
             )
             db.add(video)
+            if not filepath:
+                logger.warning(
+                    "Task %s: Video created without file_path (filepath=None); "
+                    "stream endpoint will 404 until file_path is updated",
+                    task_id,
+                )
         else:
-            # 已存在则补全/更新字段
-            if thumbnail_path:
-                video.thumbnail_path = thumbnail_path
+            # 已存在则补全/更新字段（只在有新值时更新 file_path）
             if filepath:
                 video.file_path = filepath
+            if thumbnail_path:
+                video.thumbnail_path = thumbnail_path
             for k, v in meta.items():
                 if v is not None:
                     setattr(video, k, v)
@@ -386,6 +402,26 @@ def _extract_output_filepath(info: Any) -> str | None:
     return candidates[0] if candidates else None
 
 
+async def _scan_video_file(youtube_id: str | None) -> str | None:
+    """当 info_dict 无法提供文件路径时，在磁盘上扫描已下载的视频文件。"""
+    if not youtube_id:
+        return None
+    import glob as _glob
+    patterns = [
+        f"{DATA_DIR}/**/*{youtube_id}*.mp4",
+        f"{DATA_DIR}/**/*{youtube_id}*.mkv",
+        f"{DATA_DIR}/**/*{youtube_id}*.webm",
+    ]
+    for pattern in patterns:
+        matches = _glob.glob(pattern, recursive=True)
+        for path in matches:
+            # 排除临时文件
+            if not (path.endswith(".part") or ".f1" in os.path.basename(path)):
+                if os.path.exists(path) and os.path.getsize(path) > 0:
+                    return path
+    return None
+
+
 async def _finalize_after_worker_success(task_id: int, info: Any) -> None:
     """worker 成功返回后的兜底收尾，防止 postprocessor hook 丢事件导致卡住。"""
     filepath = _extract_output_filepath(info)
@@ -398,6 +434,21 @@ async def _finalize_after_worker_success(task_id: int, info: Any) -> None:
             logger.warning("_finalize_after_worker_success: task %s not found", task_id)
             return
         current_status = task.status  # session 内读取，避免 detached 对象
+        youtube_id = task.youtube_id
+
+    # filepath 为 None 时（info_dict 为空/续传场景），扫描磁盘查找文件
+    if not filepath:
+        filepath = await _scan_video_file(youtube_id)
+        if filepath:
+            logger.info(
+                "_finalize_after_worker_success: filepath recovered by disk scan for task %s: %s",
+                task_id, filepath,
+            )
+        else:
+            logger.warning(
+                "_finalize_after_worker_success: cannot find file for task %s (youtube_id=%s)",
+                task_id, youtube_id,
+            )
 
     logger.info(
         "_finalize_after_worker_success task=%s status=%s filepath=%s",
@@ -424,6 +475,15 @@ async def handle_download_failure(task_id: int, error: str) -> None:
     async with AsyncSessionLocal() as db:
         task = await db.get(DownloadTask, task_id)
         if not task:
+            return
+
+        # 防止竞争：若 postprocessor_hook 已经把任务推到 ready，
+        # 则不应再标记失败
+        if task.status in ("ready", "cancelled"):
+            logger.info(
+                "handle_download_failure: task %s already in status=%s, skipping failure",
+                task_id, task.status,
+            )
             return
 
         task.retry_count += 1
