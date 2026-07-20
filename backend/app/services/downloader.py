@@ -547,8 +547,10 @@ async def run_download_worker(task_id: int) -> None:
                 else:
                     raise  # 其他错误直接走失败处理
             # 正常情况下 postprocessor_hook 会把任务推到 ready。
-            # 兜底：若 hook 丢失/未触发，worker 成功返回后强制收尾，避免卡在 merging。
-            await _finalize_after_worker_success(task_id, info_dict)
+            # 兜底：若 hook 丢失/未触发（尤其是带 cookies 重试续传场景），
+            # worker 成功返回后强制收尾，避免卡在 downloading/merging。
+            # info_dict 为 None 时（yt-dlp 续传模式）也强制收尾，让 ffprobe 补充元数据。
+            await _finalize_after_worker_success(task_id, info_dict or {})
         except Cancelled:
             await mark_task_cancelled(task_id)
         except Exception as e:
