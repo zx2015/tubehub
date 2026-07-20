@@ -57,7 +57,14 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: trimmed }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        let detail = `请求失败 (HTTP ${res.status})`;
+        try {
+          const errBody = await res.json();
+          if (errBody?.detail) detail = errBody.detail;
+        } catch (_) { /* ignore JSON parse error */ }
+        throw new Error(detail);
+      }
       const data: CheckResponse = await res.json();
       setCheckResult(data);
       setCheckedUrl(trimmed); // 锁定 URL
@@ -77,7 +84,7 @@ export default function AddDownloadDialog({ open, onClose, onCreated }: AddDownl
         setOverwrite(true);
       }
     } catch (e: any) {
-      setErrorMsg(`解析失败: ${e?.message ?? e}`);
+      setErrorMsg(e?.message ?? String(e));
     } finally {
       setChecking(false);
     }

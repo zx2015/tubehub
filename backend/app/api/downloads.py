@@ -35,6 +35,43 @@ router = APIRouter(prefix="/api/downloads", tags=["downloads"])
 
 
 # ----------------------------------------------------------------------
+# 工具：将 yt-dlp 原始错误消息翻译为用户友好的中文提示
+# ----------------------------------------------------------------------
+def _friendly_scrape_error(err: Exception) -> str:
+    """将 yt-dlp 常见错误翻译为中文友好提示，保留原始细节。"""
+    msg = str(err)
+    # 年龄限制 / 需要登录
+    if "Sign in" in msg or "LOGIN_REQUIRED" in msg or "age" in msg.lower():
+        return (
+            "此视频需要登录才能访问（可能是年龄限制或私人视频）。"
+            "请在设置页上传有效的 YouTube cookies 后重试。"
+        )
+    # Bot 检测（cookies 也失败）
+    if "bot" in msg.lower() or "confirm" in msg.lower():
+        return (
+            "YouTube 检测到自动化访问（Bot 检测）。"
+            "当前 cookies 可能已过期，请重新导出并在设置页上传最新 cookies。"
+        )
+    # 地区限制
+    if "not available" in msg.lower() and ("country" in msg.lower() or "region" in msg.lower()):
+        return f"此视频在当前地区不可用（地区限制）。原始错误：{msg}"
+    # 视频不存在 / 已删除
+    if "Video unavailable" in msg or "removed" in msg.lower() or "private" in msg.lower():
+        return f"视频不可用（可能已被删除或设为私有）。原始错误：{msg}"
+    # 网络/代理错误
+    if "Connection" in msg or "timeout" in msg.lower() or "proxy" in msg.lower():
+        return f"网络连接失败，请检查代理配置。原始错误：{msg}"
+    # 无格式（通常也是登录问题）
+    if "no video formats" in msg.lower() or "requested format" in msg.lower():
+        return f"无可用视频格式，可能需要登录。原始错误：{msg}"
+    # 其他：直接显示原始信息（去掉 yt-dlp 前缀）
+    # yt-dlp 错误格式通常是 "ERROR: [youtube] ID: message"
+    import re
+    clean = re.sub(r"^ERROR:\s*\[[\w]+\]\s*[\w\-]+:\s*", "", msg).strip()
+    return clean or msg
+
+
+# ----------------------------------------------------------------------
 # 工具：从 Scraper 探测结果中转换 VideoFormatOption
 # ----------------------------------------------------------------------
 def _to_video_format_option(f: dict) -> VideoFormatOption:
@@ -73,7 +110,7 @@ async def check_download(
         probe = await ScraperService.fetch_metadata(url_str)
     except Exception as e:
         logger.error(f"check_download: scrape failed for {url_str}: {e}")
-        raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")
+        raise HTTPException(status_code=400, detail=_friendly_scrape_error(e))
 
     youtube_id = probe.get("youtube_id")
     title = probe.get("title")
@@ -150,7 +187,7 @@ async def create_download(
 
     except Exception as e:
         logger.error(f"create_download: scrape failed for {url_str}: {e}")
-        raise HTTPException(status_code=400, detail=f"解析失败: {str(e)}")
+        raise HTTPException(status_code=400, detail=_friendly_scrape_error(e))
 
     # 2. 校验用户选的两个 format_id 是否在 list-formats 中（字符串比较，兼容 "140-drc" 等非纯数字 ID）
     video_ids = {str(f["id"]) for f in probe.get("video_formats", [])}
