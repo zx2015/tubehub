@@ -165,7 +165,7 @@ sequenceDiagram
      - 对每个轨生成人类可读 `label`：
        - 视频轨：`"{height}p ({ext} · {vcodec} · {tbr:.0f}kbps)"`
        - 音频轨：`"{acodec} ({ext} · {abr:.0f}kbps · {asr/1000:.0f}kHz)"`
-  3. **返回响应**：
+  3. **返回响应（格式按分辨率/码率降序排列）**：
      ```json
      {
        "conflict": false,
@@ -175,8 +175,9 @@ sequenceDiagram
        "uploader": "漫士AcadMan",
        "thumbnail_url": "https://...",
        "video_formats": [
-         { "id": 137, "label": "1080p (mp4 · avc1.640028 · 2104kbps)", "ext": "mp4", "height": 1080, "vcodec": "avc1.640028", "tbr": 2104.5 },
-         ...
+         { "id": 137, "label": "1080p · avc1 · 86MB · mp4 [137]", "height": 1080 },
+         { "id": 136, "label": "720p · avc1 · 52MB · mp4 [136]",  "height": 720  },
+         ...  ← 按 height 降序，高分辨率在前
        ],
        "audio_formats": [
          { "id": 251, "label": "opus (webm · 122kbps · 48kHz)", "ext": "webm", "acodec": "opus", "abr": 122.8, "asr": 48000 },

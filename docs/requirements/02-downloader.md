@@ -2,14 +2,17 @@
 
 > 来源：用户需求 §2, §6, §7, §8
 
-## 2.0 当前代码实现状态（2026-07-14）
+## 2.0 当前代码实现状态（2026-07-20）
 
 - 所有下载接口已完全实现：check/create/list/detail/delete/retry/SSE 进度流。
 - **无 cookies 优先策略**（scraper + downloader 均适用）：
-  - 先不带 cookies 尝试（`android_vr` 客户端，公开视频无需认证）
-  - Bot 检测 / 403 错误时自动带 cookies 重试
+  - 先不带 cookies 且**不传 `extractor_args`**，让 yt-dlp 默认选 `android_vr`（无需认证）
+  - Bot 检测 / 403 错误时自动带 cookies + `extractor_args` 重试
 - cookies 从 DB 实时读到 `/tmp` 临时只读文件，防止 yt-dlp 覆写。
 - 格式过滤支持严格层（`mp4+avc1`/`m4a+mp4a`）+ fallback 双层策略。
+- **格式列表排序**：视频格式按分辨率降序（1080p→720p→...），音频按码率降序，高画质在前。
+- 格式不可用时自动 fallback 到 `video_id+bestaudio`。
+- 并发控制：`CONCURRENCY=1`，同一时间只允许 1 个下载任务。
 - 重试机制已实现（最大 3 次，退避 0/30s/120s）；后台 `task_cleaner_loop` 已实现定时清理。
 - `stuck_recovery`：`downloading/merging` 超过 10 分钟无进度自动重置为 `queued`。
 - 当前为**单视频流程**，歌单批量下载尚未实现。
@@ -81,8 +84,8 @@ ydl_opts["format"] = f"{task.video_format_id}+{task.audio_format_id}"
 ### 2.2.4 UI 交互
 
 - 获取信息解析成功后，UI 自动展开双 select 下拉框。
-- 视频格式 select **默认选中第一个最高分辨率的视频轨**。
-- 音频格式 select **默认选中第一个最高码率的音频轨**。
+- 视频格式 select **按分辨率降序排列（1080p 在最前）**，默认选中第一项（最高分辨率）。
+- 音频格式 select **按码率降序排列**，默认选中第一项（最高码率）。
 - 用户可自由切换，最终选定的两个 id 都会在 POST /api/downloads 中显式提交给后端。
 - 提交按钮名称：**"开始下载"**。
 
@@ -90,9 +93,10 @@ ydl_opts["format"] = f"{task.video_format_id}+{task.audio_format_id}"
 
 #### 任务并行上限
 
-- **同时最多 2 个任务** 处于 `downloading` 或 `merging` 状态
-- 超出部分进入 **`queued`** 状态（新增），按 FIFO 顺序等待
-- 当有任务结束时（`Ready` / `Failed` / `Cancelled`），调度器从队列拾取最早的任务进入 `Pending` → `Downloading`
+- **同时最多 1 个任务** 处于 `downloading` 或 `merging` 状态（`CONCURRENCY=1`）
+- 超出部分进入 **`queued`** 状态，按 FIFO 顺序等待
+- 当有任务结束时（`Ready` / `Failed` / `Cancelled`），调度器从队列拾取最早的任务
+- 设为 1 的原因：避免多任务并发竞争带宽，同时降低触发 YouTube Bot 检测的风险
 
 #### 歌单（Playlist）行为
 
