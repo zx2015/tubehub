@@ -304,6 +304,10 @@ class ScraperService:
             len(video_options), len(audio_options), info.get("id"),
         )
 
+        # 排序：高分辨率 / 高码率在前
+        video_options.sort(key=lambda f: f.get("height") or 0, reverse=True)
+        audio_options.sort(key=lambda f: f.get("abr") or 0, reverse=True)
+
         return {
             "title": info.get("title"),
             "youtube_id": info.get("id"),
