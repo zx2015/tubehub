@@ -12,17 +12,19 @@
 | v1.2.0 | 2026-07-11 | ScraperService 自动读取 cookies；格式过滤 fallback；deno JS 运行时 | Copilot |
 | v1.3.0 | 2026-07-14 | 无 cookies 优先策略（scraper + downloader）；Bot 检测自动重试 | Copilot |
 | v1.4.0 | 2026-07-19 | 修复无 cookies 路径不传 extractor_args；格式不可用 fallback；upload_date 类型修复 | Copilot |
+| v1.5.0 | 2026-07-23 | MCP Browser 自动 Cookie 刷新（被动触发）；错误提示中文友好化 | Copilot |
 
 ---
 
-## 3.x 当前实现对照（2026-07-19）
+## 3.x 当前实现对照（2026-07-23）
 
 1. `POST /api/downloads` 当前实现为**单视频任务**，未实现歌单拆解入队。
 2. **并发控制**：`CONCURRENCY=1`，同一时间只允许 1 个下载任务，新任务进入 `queued` 等待。
 3. **无 cookies 优先策略**（scraper + downloader 均适用）：
    - **第一次**：不带 cookies 且不传 `extractor_args`，让 yt-dlp 自动选择默认 client（通常是 `android_vr`，无需认证）
-   - **第二次**（仅在失败时）：若错误含 `Sign in` / `bot` / `403`，带 cookies 重试（同时传 `extractor_args`）
-   - 优点：公开视频完全不消耗 cookies；cookies 过期时公开视频不受影响
+   - **第二次**（仅在失败时）：若错误含 `Sign in` / `bot` / `LOGIN_REQUIRED`，带 cookies 重试
+   - **第三次**（仅在第二次也 Bot 检测失败时）：自动从 MCP Browser 拉取新 cookies 后重试（见 §5.6）
+   - 优点：公开视频完全不消耗 cookies；cookies 过期时自动刷新，无需手动操作
 4. **cookies 防覆写机制**：`_get_cookies_path()` 每次从 DB 实时读取写到 `/tmp` 临时只读文件（`chmod 444`），防止 yt-dlp 覆写。
 5. **格式不可用 fallback**：若指定 format_id 下载报 `Requested format is not available`，自动改为 `video_id+bestaudio` 重试。
 6. **格式过滤双层策略**：严格层（`mp4+avc1`/`m4a+mp4a`）→ fallback 层（所有纯轨道）。
@@ -36,11 +38,13 @@
 
 | 症状 | 根因 | 解决方案 |
 |------|------|----------|
-| 获取信息失败（HTTP 400），日志含 `Sign in to confirm you're not a bot` | cookies 过期被 YouTube 撤销 | 重新从浏览器导出 cookies 并上传 |
+| 获取信息失败（HTTP 400），日志含 `Sign in to confirm you're not a bot` | cookies 过期被 YouTube 撤销 | 重新从浏览器导出 cookies 并上传；或配置 MCP Browser 自动刷新 |
 | 无 cookies 路径也失败，但命令行不带 cookies 能成功 | scraper 传了 `extractor_args` 指定多个 client，有过期 cookies 文件时 yt-dlp 跳过 `android_vr` | **已修复**：无 cookies 路径不传 `extractor_args` |
-| 上传 cookies 后生效一段时间又失效 | cookies 在 YouTube 服务端被轮换（浏览器活跃使用后 session token 更新） | 导出 cookies 后立即上传，关闭浏览器里的 YouTube 标签页 |
+| 上传 cookies 后生效一段时间又失效 | cookies 在 YouTube 服务端被轮换（浏览器活跃使用后 session token 更新） | 导出 cookies 后立即上传，关闭浏览器里的 YouTube 标签页；或配置 MCP Browser 自动刷新 |
 | 下载时 cookies 被覆写为空文件 | yt-dlp 某些 client 会写回 cookiefile | **已修复**：临时只读文件 + `no_cookies_update=True` |
 | 格式 ID 下载报 `Requested format is not available` | list-formats 时可见但实际下载被 YouTube 限制（如 format 139） | **已修复**：自动 fallback 到 `video_id+bestaudio` |
+| MCP Browser 同步报 `HTTP 504` | Docker 容器的 HTTP_PROXY 把内网请求转发给外网代理 | **已修复**：`mcp_browser.py` 使用 `ProxyHandler({})` 强制绕过代理 |
+| 年龄限制/LOGIN_REQUIRED 视频无法获取 | YouTube 此类视频必须带有效 cookies | 确保 MCP Browser 已配置且 Chrome 已登录 YouTube；系统会自动刷新 |
 
 ### 关键技术说明
 

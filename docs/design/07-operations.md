@@ -10,6 +10,7 @@
 | v2.0.0 | 2026-07-08 | 新增"容器自愈启动入口"机制（git pull + pip upgrade on boot） | Gemini CLI |
 | v2.0.1 | 2026-07-10 | 按当前代码修正 entrypoint 与部署行为说明 | Copilot |
 | v2.1.0 | 2026-07-11 | entrypoint CWD 改为 /app + --app-dir；deno 安装；HDD 数据目录迁移 | Copilot |
+| v2.2.0 | 2026-07-23 | Dockerfile 改用代理 ARG 方式配置 apt；NO_PROXY 扩展内网段；MCP Browser 局域网直连说明 | Copilot |
 
 ## 7.1 启动顺序
 
@@ -42,14 +43,20 @@ sequenceDiagram
 **操作员日常工作流**：
 ```bash
 # 推送代码后，远程重新构建并启动
+# tcagent-z15 使用代理 http://10.182.67.191:8080 访问外网
 ssh tcagent-z15 "cd /home/tubehub/repo && git pull && \
-  HTTP_PROXY=http://10.158.100.9:8080 HTTPS_PROXY=http://10.158.100.9:8080 \
-  docker compose build && \
-  HTTP_PROXY=http://10.158.100.9:8080 HTTPS_PROXY=http://10.158.100.9:8080 \
-  docker compose up -d"
+  docker build \
+    --build-arg HTTP_PROXY=http://10.182.67.191:8080 \
+    --build-arg HTTPS_PROXY=http://10.182.67.191:8080 \
+    -t tubehub:latest . && \
+  docker compose down && docker compose up -d"
 ```
 
-> ⚠️ **代理注意**：宿主机 shell 环境变量优先级高于 `.env` 文件。若宿主机 shell 中已设置旧代理，必须在 `docker compose` 命令前显式覆盖。
+> ⚠️ **代理注意**：
+> - `docker build` 时通过 `--build-arg` 传入代理（用于 apt-get 和 pip）
+> - `docker compose up` 时代理从宿主机 `.env` 或 `${HTTP_PROXY:-}` 传入运行时容器
+> - `NO_PROXY` 已设置为 `localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`，内网请求（含 MCP Browser）自动绕过代理
+> - Python `urllib` 不支持 CIDR 格式的 `NO_PROXY`，因此 `mcp_browser.py` 使用 `ProxyHandler({})` 强制绕过代理
 
 ### 7.1.1 本地 venv 启动
 
@@ -213,7 +220,7 @@ services:
       - PYTHONPATH=/app/backend
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
-      - NO_PROXY=localhost,127.0.0.1
+      - NO_PROXY=localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
       - SECRET_KEY=${SECRET_KEY:-tubehub-change-me-in-production}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
@@ -240,20 +247,26 @@ services:
 ## 7.6 升级流程
 
 ```bash
-# 1. 备份
-make backup  # 或手动执行 tar
+# 1. 备份（可选）
+ssh tcagent-z15 "cp /home/tubehub/data/tubehub.db /home/tubehub/data/tubehub.db.bak"
 
 # 2. 拉取最新代码
-git pull
+ssh tcagent-z15 "cd /home/tubehub/repo && git pull"
 
-# 3. 更新依赖
-docker-compose build --pull
+# 3. 重建镜像（有 Dockerfile/依赖变更时）
+ssh tcagent-z15 "cd /home/tubehub/repo && docker build \
+  --build-arg HTTP_PROXY=http://10.182.67.191:8080 \
+  --build-arg HTTPS_PROXY=http://10.182.67.191:8080 \
+  -t tubehub:latest ."
 
-# 4. 滚动重启
-docker-compose up -d
+# 4. 热更新纯 Python 文件（无 Dockerfile 变更时更快）
+ssh tcagent-z15 "docker cp /home/tubehub/repo/backend/app tubehub:/app/backend/ && docker restart tubehub"
 
-# 5. 验证健康
-curl http://localhost:8000/api/health
+# 5. 滚动重启
+ssh tcagent-z15 "cd /home/tubehub/repo && docker compose down && docker compose up -d"
+
+# 6. 验证健康
+curl http://192.168.110.117:8000/api/health
 ```
 
 ## 7.7 性能监控（MVP 不集成 Sentry）
