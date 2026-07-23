@@ -54,8 +54,10 @@ class McpBrowserClient:
             headers["Mcp-Session-Id"] = session_id
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(self._mcp_url, data=data, headers=headers, method="POST")
+        # MCP Browser 是局域网服务，强制绕过系统代理（urllib 默认会读取 HTTP_PROXY 环境变量）
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            with opener.open(req, timeout=self.timeout) as r:
                 sid = r.headers.get("Mcp-Session-Id")
                 return sid, r.read().decode("utf-8")
         except urllib.error.HTTPError as e:
@@ -133,8 +135,9 @@ class McpBrowserClient:
     def health_check(self) -> bool:
         """检查 MCP Browser 服务是否可用。"""
         req = urllib.request.Request(f"{self.base_url}/health")
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         try:
-            with urllib.request.urlopen(req, timeout=5) as r:
+            with opener.open(req, timeout=5) as r:
                 data = json.loads(r.read())
                 return data.get("status") == "ok"
         except Exception:
