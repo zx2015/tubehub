@@ -22,7 +22,7 @@ services:
       - PYTHONPATH=/app/backend
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
-      - NO_PROXY=localhost,127.0.0.1
+      - NO_PROXY=localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
       - SECRET_KEY=${SECRET_KEY:-tubehub-change-me-in-production}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
