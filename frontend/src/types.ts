@@ -56,3 +56,16 @@ export interface CookieStatus {
   file_size: number | null;
   note: string;
 }
+
+export interface McpConfig {
+  url: string;
+  token: string;
+  enabled: boolean;
+}
+
+export interface McpSyncResult {
+  success: boolean;
+  message: string;
+  cookie_count: number | null;
+  file_size: number | null;
+}

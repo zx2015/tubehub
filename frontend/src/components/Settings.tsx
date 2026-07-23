@@ -4,9 +4,11 @@
  * Cookie 管理：支持两种上传方式
  *   1. 选择本地 .txt 文件上传
  *   2. 直接粘贴文本内容
+ *
+ * MCP Browser：配置自动 cookie 刷新（mcp-browser 服务地址 + token）
  */
 import { useEffect, useRef, useState } from 'react';
-import type { CookieStatus } from '../types';
+import type { CookieStatus, McpConfig, McpSyncResult } from '../types';
 
 export function Settings() {
   const [cookieText, setCookieText]     = useState('');
@@ -16,10 +18,29 @@ export function Settings() {
   const [dragOver, setDragOver]         = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // MCP Browser 状态
+  const [mcpConfig, setMcpConfig]     = useState<McpConfig>({ url: '', token: '', enabled: false });
+  const [mcpUrl, setMcpUrl]           = useState('');
+  const [mcpToken, setMcpToken]       = useState('');
+  const [mcpSaving, setMcpSaving]     = useState(false);
+  const [mcpSyncing, setMcpSyncing]   = useState(false);
+  const [mcpMsg, setMcpMsg]           = useState<string | null>(null);
+
   useEffect(() => {
     fetch('/api/settings/cookies')
       .then(async (r) => (r.ok ? ((await r.json()) as CookieStatus) : null))
       .then((s) => { if (s) setCookieStatus(s); })
+      .catch(() => undefined);
+
+    fetch('/api/settings/mcp')
+      .then(async (r) => (r.ok ? ((await r.json()) as McpConfig) : null))
+      .then((cfg) => {
+        if (cfg) {
+          setMcpConfig(cfg);
+          setMcpUrl(cfg.url);
+          setMcpToken(cfg.token);
+        }
+      })
       .catch(() => undefined);
   }, []);
 
@@ -88,6 +109,50 @@ export function Settings() {
       setCookieMsg('✅ Cookie 已清除');
     } catch (err) {
       setCookieMsg(`❌ 清除失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  // 保存 MCP 配置
+  const handleSaveMcp = async () => {
+    setMcpSaving(true);
+    setMcpMsg(null);
+    try {
+      const resp = await fetch('/api/settings/mcp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: mcpUrl, token: mcpToken, enabled: false }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const cfg = (await resp.json()) as McpConfig;
+      setMcpConfig(cfg);
+      setMcpToken(cfg.token); // 显示 mask 后的 token
+      setMcpMsg('✅ MCP Browser 配置已保存');
+    } catch (err) {
+      setMcpMsg(`❌ 保存失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setMcpSaving(false);
+    }
+  };
+
+  // 立即同步 cookies
+  const handleMcpSync = async () => {
+    setMcpSyncing(true);
+    setMcpMsg(null);
+    try {
+      const resp = await fetch('/api/settings/mcp/sync', { method: 'POST' });
+      const result = (await resp.json()) as McpSyncResult;
+      if (result.success) {
+        setMcpMsg(`✅ ${result.message}`);
+        // 刷新 cookie 状态显示
+        const cs = await fetch('/api/settings/cookies').then(r => r.ok ? r.json() : null);
+        if (cs) setCookieStatus(cs as CookieStatus);
+      } else {
+        setMcpMsg(`❌ ${result.message}`);
+      }
+    } catch (err) {
+      setMcpMsg(`❌ 同步失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setMcpSyncing(false);
     }
   };
 
@@ -182,6 +247,71 @@ export function Settings() {
         )}
       </section>
 
+      {/* MCP Browser Section */}
+      <section className="settings__section" style={{ marginTop: '32px' }}>
+        <h2>🤖 MCP Browser 自动 Cookie 刷新</h2>
+        <p className="settings__hint">
+          配置 <strong>mcp-browser</strong> 服务地址后，当 YouTube 检测到 Bot 行为导致
+          Cookie 失效时，TubeHub 会<strong>自动</strong>从已登录的 Chrome 浏览器拉取最新 Cookie。
+          也可点击"立即同步"手动刷新。
+        </p>
+
+        <div className="settings__mcp-status">
+          状态：{mcpConfig.enabled
+            ? <strong className="settings__status--ok">✅ 已配置</strong>
+            : <strong className="settings__status--muted">⚠️ 未配置</strong>}
+        </div>
+
+        <div className="settings__field">
+          <label className="settings__label">服务地址</label>
+          <input
+            className="settings__input"
+            type="url"
+            placeholder="http://192.168.110.123:9000"
+            value={mcpUrl}
+            onChange={(e) => setMcpUrl(e.target.value)}
+          />
+        </div>
+
+        <div className="settings__field">
+          <label className="settings__label">Auth Token</label>
+          <input
+            className="settings__input"
+            type="password"
+            placeholder="Bearer token（留空保留已有配置）"
+            value={mcpToken}
+            onChange={(e) => setMcpToken(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
+
+        <div className="settings__row">
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={handleSaveMcp}
+            disabled={mcpSaving || (!mcpUrl && !mcpToken)}
+          >
+            {mcpSaving ? '保存中…' : '保存配置'}
+          </button>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={handleMcpSync}
+            disabled={mcpSyncing || !mcpConfig.enabled}
+            title={!mcpConfig.enabled ? '请先保存 MCP Browser 配置' : ''}
+          >
+            {mcpSyncing ? '同步中…' : '立即同步 Cookie'}
+          </button>
+        </div>
+
+        {mcpMsg && (
+          <div className={`settings__msg${mcpMsg.startsWith('✅') ? ' settings__msg--ok' : ' settings__msg--err'}`}>
+            {mcpMsg}
+          </div>
+        )}
+      </section>
+
       {/* 代理说明 */}
       <section className="settings__section" style={{ marginTop: '32px' }}>
         <h2>全局网络代理</h2>
@@ -196,3 +326,4 @@ export function Settings() {
 }
 
 export default Settings;
+

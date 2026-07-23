@@ -10,6 +10,7 @@
 | v2.0.0 | 2026-07-08 | **架构重构**：移除 `ytdlp_proxy` 字段及所有代理接口。代理统一切到宿主机 `.env` 环境变量 | Gemini CLI |
 | v2.1.0 | 2026-07-11 | 补充 Cookies 安全规范：严禁入库 | Copilot |
 | v2.2.0 | 2026-07-14 | Cookies 防覆写机制：从 DB 读到临时只读文件；无 cookies 优先策略 | Copilot |
+| v3.0.0 | 2026-07-23 | MCP Browser 自动 Cookie 刷新：被动触发策略、新 API、前端配置 UI | Copilot |
 
 ---
 
@@ -207,3 +208,76 @@ sequenceDiagram
 - [01-database-schema.md](01-database-schema.md) — 数据库 Schema
 - [03-yt-dlp-integration.md](03-yt-dlp-integration.md) — yt-dlp 调度与参数传入
 - [07-operations.md](07-operations.md) — 容器自愈启动与 .env 配置
+
+---
+
+## 5.6 MCP Browser 自动 Cookie 刷新（v3.0）
+
+### 5.6.1 功能概述
+
+当 YouTube Bot 检测导致 cookies 失效时，TubeHub 可自动从运行在局域网的 `mcp-browser` 服务（已登录 Chrome 浏览器）拉取最新 cookies，无需用户手动操作。
+
+### 5.6.2 数据模型扩展
+
+`system_settings` 表新增两个 key：
+
+| key | 类型 | 含义 |
+|-----|------|------|
+| `mcp_browser_url` | Text | mcp-browser 服务地址，如 `http://192.168.110.123:9000` |
+| `mcp_browser_token` | Text | Bearer auth token（明文存储，API 返回时 mask） |
+
+### 5.6.3 自动刷新触发策略（被动方案）
+
+```
+用户请求（获取信息 / 下载）
+    │
+    ▼ 第一次：不带 cookies（android_vr）
+    ├─ 成功 → 直接返回
+    └─ Bot 检测失败
+            │
+            ▼ 第二次：带本地 cookies 重试
+            ├─ 成功 → 返回
+            └─ Bot 检测仍失败（cookies 过期）
+                    │
+                    ▼ 【新】尝试 MCP Browser 自动刷新
+                    │   SettingsService.sync_cookies_from_mcp()
+                    │   → McpBrowserClient.fetch_youtube_cookies_netscape()
+                    │
+                    ├─ 刷新成功 → 第三次：带新 cookies 重试 → 返回
+                    └─ 刷新失败（MCP 未配置 / 不可达）→ 抛出用户友好错误
+```
+
+### 5.6.4 MCP Browser 协议流程
+
+使用 [MCP Streamable HTTP 2026 spec](https://github.com/zx2015/mcp-browser/blob/main/docs/API.md)：
+
+```
+1. POST /mcp  initialize        → 获取 Mcp-Session-Id
+2. POST /mcp  initialized       （通知，无响应体）
+3. POST /mcp  tools/call        name=cookie_list  domain=youtube.com
+4. POST /mcp  tools/call        name=cookie_list  domain=google.com
+5. 合并 cookies → 转 Netscape 格式 → 写入 DB + 磁盘
+```
+
+### 5.6.5 API 接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/settings/mcp` | 获取当前配置（token 已 mask） |
+| `POST` | `/api/settings/mcp` | 保存地址 + token |
+| `POST` | `/api/settings/mcp/sync` | 立即从 MCP Browser 同步 cookies |
+
+### 5.6.6 安全规范
+
+- `mcp_browser_token` 存 DB 明文；API 返回前用 `****` mask 中间部分
+- 前端判断 token 是否含 `****` 来决定是否写回（避免将 mask 覆盖真实 token）
+- MCP Browser 服务应仅在局域网内可达，不对外暴露
+
+### 5.6.7 相关文件
+
+| 文件 | 说明 |
+|------|------|
+| `backend/app/services/mcp_browser.py` | MCP 协议客户端（标准库，无第三方依赖） |
+| `backend/app/services/settings.py` | `get/set_mcp_config()`、`sync_cookies_from_mcp()` |
+| `backend/app/api/settings.py` | 三个新 API 端点 |
+| `frontend/src/components/Settings.tsx` | MCP Browser 配置 section |

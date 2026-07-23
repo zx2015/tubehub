@@ -78,6 +78,34 @@ def _get_cookies_path() -> str | None:
     return None
 
 
+async def _try_refresh_cookies_from_mcp() -> str | None:
+    """
+    尝试从 MCP Browser 自动刷新 cookies。
+
+    如果 MCP Browser 已配置且可达，则拉取最新 cookies 写入 DB + 磁盘，
+    并返回新 cookies 的临时文件路径；否则返回 None。
+    """
+    try:
+        from app.services.settings import SettingsService
+        result = await SettingsService.sync_cookies_from_mcp()
+        if result.get("success"):
+            logger.info(
+                "ScraperService: MCP Browser cookie refresh succeeded (%s cookies)",
+                result.get("cookie_count"),
+            )
+            # 重新读取新写入的 cookies
+            return _get_cookies_path()
+        else:
+            logger.warning(
+                "ScraperService: MCP Browser cookie refresh failed: %s",
+                result.get("message"),
+            )
+            return None
+    except Exception as e:
+        logger.warning("ScraperService: MCP Browser auto-refresh exception: %s", e)
+        return None
+
+
 def _video_label(f: dict) -> str:
     """生成人类可读的视频格式 label
 
@@ -203,19 +231,56 @@ class ScraperService:
             info = _do_extract(with_cookies=False)
         except Exception as e:
             err_str = str(e)
-            # Bot 检测或需要登录 → 带 cookies 重试
-            if ("Sign in" in err_str or "bot" in err_str.lower() or
-                    "confirm" in err_str.lower()) and cookies_path:
-                logger.warning(
-                    "ScraperService: Bot detection without cookies, retrying with cookies (%s)",
-                    url,
-                )
-                try:
-                    info = _do_extract(with_cookies=True)
-                except Exception as e2:
-                    raise e2  # cookies 也失败，抛出最终错误
+            is_auth_error = ("Sign in" in err_str or "bot" in err_str.lower() or
+                             "confirm" in err_str.lower() or "LOGIN_REQUIRED" in err_str)
+            if is_auth_error:
+                # 第二次：带 cookies 重试
+                if cookies_path:
+                    logger.warning(
+                        "ScraperService: Bot detection without cookies, retrying with cookies (%s)",
+                        url,
+                    )
+                    try:
+                        info = _do_extract(with_cookies=True)
+                    except Exception as e2:
+                        err_str2 = str(e2)
+                        # cookies 也报 Bot 检测 → 尝试从 MCP Browser 刷新 cookies
+                        if ("Sign in" in err_str2 or "bot" in err_str2.lower() or
+                                "confirm" in err_str2.lower()):
+                            logger.warning(
+                                "ScraperService: cookies also failed (Bot), "
+                                "attempting MCP Browser auto-refresh for %s",
+                                url,
+                            )
+                            new_cp = await _try_refresh_cookies_from_mcp()
+                            if new_cp:
+                                cookies_path = new_cp  # 用新 cookies 再试一次
+                                try:
+                                    info = _do_extract(with_cookies=True)
+                                except Exception as e3:
+                                    raise e3
+                            else:
+                                raise e2  # MCP 也无法刷新，抛出原始 cookies 失败错误
+                        else:
+                            raise e2  # 其他类型错误直接抛出
+                else:
+                    # 无 cookies 文件 → 直接尝试 MCP 刷新
+                    logger.warning(
+                        "ScraperService: Bot detection, no local cookies, "
+                        "attempting MCP Browser auto-refresh for %s",
+                        url,
+                    )
+                    new_cp = await _try_refresh_cookies_from_mcp()
+                    if new_cp:
+                        cookies_path = new_cp
+                        try:
+                            info = _do_extract(with_cookies=True)
+                        except Exception as e3:
+                            raise e3
+                    else:
+                        raise  # MCP 也没有，抛出原始错误
             else:
-                raise  # 其他错误直接抛出
+                raise  # 非认证错误直接抛出
 
         if not info:
             raise ValueError("无法解析 YouTube URL")

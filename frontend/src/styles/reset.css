@@ -1660,3 +1660,50 @@ button {
 .video-player__status--error {
   color: var(--accent);
 }
+
+/* btn--secondary */
+.btn--secondary {
+  background-color: var(--bg-elevated);
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+.btn--secondary:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  border-color: var(--fg-tertiary);
+}
+
+/* Settings: MCP Browser 配置表单 */
+.settings__mcp-status {
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.settings__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-secondary);
+}
+
+.settings__input {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font-size: 14px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+.settings__input:focus {
+  border-color: var(--accent);
+}
+.settings__input::placeholder {
+  color: var(--fg-tertiary);
+}

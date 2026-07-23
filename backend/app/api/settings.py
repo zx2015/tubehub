@@ -4,7 +4,7 @@
 """
 from fastapi import APIRouter, Body
 
-from app.schemas.settings import CookieStatus
+from app.schemas.settings import CookieStatus, McpConfig, McpSyncResult
 from app.services.settings import SettingsService
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -41,3 +41,27 @@ async def clear_cookies_endpoint():
     """清除 Cookie。"""
     await SettingsService.clear_cookies()
     return CookieStatus(has_cookie=False)
+
+
+# ---------------------------------------------------------------------------
+# MCP Browser 配置
+# ---------------------------------------------------------------------------
+@router.get("/mcp", response_model=McpConfig)
+async def get_mcp_config():
+    """获取 MCP Browser 配置（token 已 mask）。"""
+    cfg = await SettingsService.get_mcp_config()
+    return McpConfig(**cfg)
+
+
+@router.post("/mcp", response_model=McpConfig)
+async def save_mcp_config(body: McpConfig):
+    """保存 MCP Browser 地址与 Token。"""
+    cfg = await SettingsService.set_mcp_config(url=body.url, token=body.token)
+    return McpConfig(**cfg)
+
+
+@router.post("/mcp/sync", response_model=McpSyncResult)
+async def sync_mcp_cookies():
+    """立即从 MCP Browser 同步 YouTube cookies。"""
+    result = await SettingsService.sync_cookies_from_mcp()
+    return McpSyncResult(**result)
