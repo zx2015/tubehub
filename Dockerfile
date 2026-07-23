@@ -21,12 +21,16 @@ FROM python:3.12-slim
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 
-# 使用国内镜像源，安装系统依赖（含 deno 用于 yt-dlp JS 运行时）
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+# 安装系统依赖（含 deno 用于 yt-dlp JS 运行时）
+# 通过 ARG 传入代理供 apt-get 使用
+RUN if [ -n "$HTTP_PROXY" ]; then \
+        echo "Acquire::http::Proxy \"$HTTP_PROXY\";" > /etc/apt/apt.conf.d/99proxy; \
+        echo "Acquire::https::Proxy \"$HTTP_PROXY\";" >> /etc/apt/apt.conf.d/99proxy; \
+    fi \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         ffmpeg curl ca-certificates unzip \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /etc/apt/apt.conf.d/99proxy
 
 # 安装 deno（yt-dlp 2026.07+ 需要 JS 运行时来处理受限视频）
 RUN curl ${HTTP_PROXY:+-x $HTTP_PROXY} -fsSL https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip \
